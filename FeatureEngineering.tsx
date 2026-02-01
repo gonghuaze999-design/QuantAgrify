@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface FeatureEngineeringProps {
@@ -28,18 +29,18 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
           <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col">
-            <h1 className="text-xl font-bold tracking-tight text-white leading-none">QuantAgrify</h1>
-            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">Big Data Platform</span>
+          <div className="flex flex-col leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
+            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
         
-        <div className="flex items-center gap-8 h-full">
+        <div className="flex items-center gap-10 h-full">
           {navItems.map((item) => (
             <button 
               key={item.label}
               onClick={() => item.view !== 'algorithm' && onNavigate(item.view)}
-              className={`h-full flex items-center gap-2 px-1 text-sm font-medium transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
+              className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
               <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}

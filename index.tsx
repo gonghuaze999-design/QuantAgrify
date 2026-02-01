@@ -22,13 +22,10 @@ import { PortfolioAssets } from './PortfolioAssets';
 import { ApiConsole } from './ApiConsole';
 import { ApiDocs } from './ApiDocs';
 import { ApiLogs } from './ApiLogs';
+import { UserManagement } from './UserManagement';
 
-/**
- * MAIN APP ROUTER
- * Orchestrates the transition between terminal login, the welcome hub, and feature modules.
- */
 const QuantAgrifyApp = () => {
-  const [currentView, setCurrentView] = useState<'login' | 'hub' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api' | 'apiDocs' | 'apiLogs'>('login');
+  const [currentView, setCurrentView] = useState<'login' | 'hub' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api' | 'apiDocs' | 'apiLogs' | 'userMgmt'>('login');
 
   const handleNavigate = (view: typeof currentView) => {
     setCurrentView(view);
@@ -122,6 +119,10 @@ const QuantAgrifyApp = () => {
 
       {currentView === 'apiLogs' && (
         <ApiLogs onNavigate={handleNavigate} />
+      )}
+
+      {currentView === 'userMgmt' && (
+        <UserManagement onNavigate={handleNavigate} />
       )}
     </div>
   );

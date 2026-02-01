@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 
 interface AlgorithmWorkflowProps {
@@ -24,13 +25,13 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
     <div className="bg-[#05070a] text-white font-['Space_Grotesk'] min-h-screen flex flex-col overflow-hidden selection:bg-[#0d59f2]/30">
       {/* Precision Navigation Bar */}
       <nav className="h-16 border-b border-white/10 bg-[#0a0e17]/80 backdrop-blur-2xl px-8 flex items-center justify-between z-[60] shrink-0">
-        <div className="flex items-center gap-4 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
+        <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
           <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col">
-            <h1 className="text-xl font-bold tracking-tighter text-white">QuantAgrify</h1>
-            <span className="text-[9px] font-black tracking-[0.4em] text-[#90a4cb] uppercase mt-0.5 opacity-60">Algorithm Hub</span>
+          <div className="flex flex-col leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
+            <span className="text-[9px] font-bold tracking-[0.2em] text-white uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
         
@@ -39,8 +40,9 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
             <button 
               key={item.label}
               onClick={() => item.view !== 'algorithm' && onNavigate(item.view)}
-              className={`h-full flex items-center gap-2 px-1 text-xs font-black uppercase tracking-[0.2em] transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-white' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
+              className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
+              <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}
             </button>
           ))}

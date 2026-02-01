@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface RiskManagementProps {
@@ -30,25 +31,25 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
     <div className="bg-[#0a0c10] text-white font-['Space_Grotesk'] h-screen flex flex-col overflow-hidden selection:bg-[#0d59f2]/30">
       {/* Global Header */}
       <header className="flex items-center justify-between border-b border-[#222f49] bg-[#0a0c10] px-6 h-16 shrink-0 z-50">
-        <div className="flex items-center gap-3 w-1/4 cursor-pointer" onClick={() => onNavigate('hub')}>
-          <div className="bg-[#0d59f2] h-10 w-10 flex items-center justify-center rounded-lg shadow-lg shadow-[#0d59f2]/20">
+        <div className="flex items-center gap-3 w-1/4 cursor-pointer group" onClick={() => onNavigate('hub')}>
+          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
           <div className="flex flex-col leading-none">
             <h1 className="text-white text-xl font-bold tracking-tight">QuantAgrify</h1>
-            <span className="text-[9px] text-[#90a4cb] font-bold tracking-[0.15em] uppercase mt-1">BIG DATA PLATFORM</span>
+            <span className="text-[9px] text-[#90a4cb] font-bold tracking-[0.2em] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
 
-        <nav className="flex items-center gap-10 h-full">
+        <nav className="flex-1 flex justify-center items-center gap-10 h-full">
           {navItems.map((item) => (
             <button
               key={item.label}
               onClick={() => item.view !== 'cockpit' && onNavigate(item.view)}
-              className={`h-full flex items-center text-sm font-medium transition-all relative ${item.active ? 'text-[#0d59f2]' : 'text-[#90a4cb] hover:text-white'}`}
+              className={`h-full flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-all relative border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
+              <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}
-              {item.active && <div className="absolute -bottom-[1px] left-0 w-full h-0.5 bg-[#0d59f2]"></div>}
             </button>
           ))}
         </nav>

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 
 interface DataSourceConfigProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'cockpit' | 'api') => void;
@@ -22,26 +23,46 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
     { label: 'API Console', icon: 'terminal', view: 'api' as const }
   ];
 
+  // --- New Logic State ---
+  const [commodity, setCommodity] = useState('Corn');
+  const [exchange, setExchange] = useState('CBOT (USA)');
+  const [vectorRegion, setVectorRegion] = useState({ name: 'US Midwest (Corn Belt)', center: 'Iowa', coords: '41.87, -93.62' });
+
+  // Logic: Map Commodity + Exchange -> Major Production Area (70% Price Driver)
+  useEffect(() => {
+    if (commodity === 'Corn') {
+        if (exchange.includes('CBOT')) setVectorRegion({ name: 'US Midwest (Corn Belt)', center: 'Iowa/Illinois', coords: '41.87, -93.62' });
+        if (exchange.includes('DCE')) setVectorRegion({ name: 'China Northeast (Golden Corn Belt)', center: 'Heilongjiang/Jilin', coords: '45.75, 126.63' });
+        if (exchange.includes('MATIF')) setVectorRegion({ name: 'Black Sea / Ukraine', center: 'Poltava', coords: '49.58, 34.55' });
+    } else if (commodity === 'Soybeans') {
+        if (exchange.includes('CBOT')) setVectorRegion({ name: 'Brazil (Mato Grosso)', center: 'Sorriso', coords: '-12.55, -55.72' }); // Brazil drives soy price heavily now
+        if (exchange.includes('DCE')) setVectorRegion({ name: 'China Northeast (Non-GMO)', center: 'Heilongjiang', coords: '47.35, 130.33' });
+    } else if (commodity === 'Wheat') {
+        if (exchange.includes('CBOT')) setVectorRegion({ name: 'US Great Plains (HRW)', center: 'Kansas', coords: '38.50, -98.35' });
+        if (exchange.includes('MATIF')) setVectorRegion({ name: 'France / Germany', center: 'Beauce', coords: '48.45, 1.55' });
+    }
+  }, [commodity, exchange]);
+
   return (
     <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
-      {/* Navigation Bar (Updated to match Algorithm style) */}
+      {/* Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
-        <div className="flex items-center gap-3 w-80 cursor-pointer" onClick={() => onNavigate('hub')}>
-          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20">
+        <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
+          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col">
-            <h1 className="text-xl font-bold tracking-tight text-white leading-none">QuantAgrify</h1>
-            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">Big Data Platform</span>
+          <div className="flex flex-col text-left leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
+            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
         
-        <div className="flex items-center gap-8 h-full">
+        <div className="flex items-center gap-10 h-full">
           {navItems.map((item) => (
             <button 
               key={item.label}
               onClick={() => item.view !== 'dataSource' && onNavigate(item.view)}
-              className={`h-full flex items-center gap-2 px-1 text-sm font-medium transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
+              className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
               <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}
@@ -94,7 +115,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
             <div className="flex flex-col">
               <h2 className="text-white text-xl font-bold">Data Source Configuration</h2>
               <div className="flex gap-2 mt-2">
-                {['Soybeans (CBOT)', 'Source: NOAA Satellite', 'Region: Brazil/Midwest'].map(tag => (
+                {['Satellite: Sentinel-2', 'Freq: Daily', 'Res: 10m'].map(tag => (
                   <div key={tag} className="flex h-6 items-center gap-x-2 rounded bg-[#182234] border border-[#314368] px-3">
                     <span className="text-[#0d59f2] text-[10px] font-bold">●</span>
                     <p className="text-[#90a4cb] text-[11px] font-medium leading-normal">{tag}</p>
@@ -113,23 +134,19 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
           </header>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
-            {/* Filter Section */}
-            <section className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-[#182234]/30 p-4 rounded-xl border border-[#314368]">
-              {['Time Range', 'Indicator set', 'Commodity Type'].map((label) => (
-                <label key={label} className="flex flex-col">
-                  <span className="text-[#90a4cb] text-xs font-bold uppercase mb-2 tracking-wide">{label}</span>
-                  <select className="bg-[#101622] border border-[#314368] text-white text-sm rounded-lg h-11 px-3 focus:ring-1 focus:ring-[#0d59f2] outline-none">
-                    <option>Select Option...</option>
-                    <option selected>{label === 'Time Range' ? 'Last 12 Months (Rolling)' : (label === 'Indicator set' ? 'Vegetation Health Index (VHI)' : 'Soybeans')}</option>
-                  </select>
-                </label>
-              ))}
-              <div className="flex items-end">
-                <button className="w-full bg-[#0d59f2] hover:bg-[#0d59f2]/90 text-white rounded-lg h-11 flex items-center justify-center gap-2 font-bold transition-all shadow-lg shadow-[#0d59f2]/20">
-                  <span className="material-symbols-outlined text-sm">filter_list</span>
-                  Update Filters
-                </button>
-              </div>
+            {/* Filter Section - Visual Only for Context */}
+            <section className="bg-[#182234]/20 p-4 rounded-xl border border-[#314368] flex items-center justify-between">
+               <div className="flex gap-4">
+                  <div className="px-4 py-2 bg-[#0d59f2]/10 border border-[#0d59f2]/30 rounded-lg text-[#0d59f2] text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm">satellite</span>
+                    Remote Sensing Layer
+                  </div>
+                  <div className="px-4 py-2 bg-[#182234] border border-[#314368] rounded-lg text-[#90a4cb] text-xs font-bold uppercase tracking-wider flex items-center gap-2 opacity-60">
+                    <span className="material-symbols-outlined text-sm">cloud</span>
+                    Meteorology Layer
+                  </div>
+               </div>
+               <span className="text-[10px] text-[#90a4cb] uppercase tracking-widest">Active Pipeline Configuration</span>
             </section>
 
             {/* Middle Visualization Row */}
@@ -138,11 +155,11 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
                 <div className="flex justify-between items-start mb-6">
                   <div>
                     <h3 className="text-white text-lg font-bold">Normalized Health Index (NHI) vs Futures Price</h3>
-                    <p className="text-[#90a4cb] text-xs">Correlating satellite biomass readings with CBOT front-month contracts</p>
+                    <p className="text-[#90a4cb] text-xs">Correlating satellite biomass readings with selected exchange contracts</p>
                   </div>
                   <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-[#90a4cb]">
                     <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 bg-[#0d59f2] rounded-full"></i> NHI Trend</span>
-                    <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 bg-[#90a4cb]/40 rounded-full border border-[#90a4cb]/20"></i> Market Price</span>
+                    <span className="flex items-center gap-1.5"><i className="w-2.5 h-2.5 bg-[#90a4cb]/40 rounded-full border border-[#90a4cb]/20"></i> {commodity} Price</span>
                   </div>
                 </div>
                 <div className="h-64 w-full relative">
@@ -170,101 +187,92 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
               </div>
 
               <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
-                <div className="bg-[#182234]/20 border border-[#314368] rounded-xl p-5 flex-1">
-                  <h3 className="text-white text-sm font-bold mb-4 uppercase tracking-wide">Yield Heatmap (Regional)</h3>
-                  <div className="grid grid-cols-4 gap-1 h-32">
-                    {[0.2, 0.4, 0.6, 0.8, 0.9, 0.3, 0.5, 0.1, 0.7, 0.4, 0.6, 0.2, 0.5, 0.8, 0.3, 0.9].map((v, i) => (
-                      <div key={i} className="rounded-sm" style={{ backgroundColor: `rgba(13, 89, 242, ${v})` }}></div>
-                    ))}
+                <div className="bg-[#182234]/20 border border-[#314368] rounded-xl p-5 flex-1 flex flex-col">
+                  <h3 className="text-white text-sm font-bold mb-4 uppercase tracking-wide">Target Vector: {vectorRegion.center}</h3>
+                  <div className="flex-1 bg-[#101622] rounded-lg border border-[#314368] relative overflow-hidden flex items-center justify-center">
+                     {/* Abstract Vector Map Representation */}
+                     <svg viewBox="0 0 100 100" className="w-full h-full p-4 opacity-50">
+                        <polygon points="20,80 30,30 70,20 90,60 60,90" fill="#0d59f2" fillOpacity="0.1" stroke="#0d59f2" strokeWidth="1" strokeDasharray="2" />
+                        <circle cx="55" cy="55" r="2" fill="#0bda5e" />
+                        <text x="58" y="55" fill="#white" fontSize="4" className="uppercase font-mono">Centroid</text>
+                     </svg>
+                     <div className="absolute top-2 left-2 bg-black/60 px-2 py-1 rounded text-[9px] text-[#90a4cb] font-mono">
+                        GEOJSON_ID: 8842_A
+                     </div>
                   </div>
                   <div className="mt-4 flex items-center justify-between">
-                    <span className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">Confidence Score</span>
-                    <span className="text-sm font-bold text-white">94.2%</span>
+                    <span className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">Data Coverage</span>
+                    <span className="text-sm font-bold text-white">100%</span>
                   </div>
                   <div className="w-full bg-[#314368] h-1.5 rounded-full mt-2 overflow-hidden">
-                    <div className="bg-[#0d59f2] h-full w-[94.2%]"></div>
+                    <div className="bg-[#0bda5e] h-full w-full"></div>
                   </div>
                 </div>
-                <div className="bg-[#0d59f2]/10 border border-[#0d59f2]/30 rounded-xl p-5 group hover:border-[#0d59f2] transition-colors">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="material-symbols-outlined text-[#0d59f2] animate-pulse">warning</span>
-                    <h3 className="text-white text-sm font-bold">Data Quality Alert</h3>
-                  </div>
-                  <p className="text-[#90a4cb] text-xs leading-relaxed">Latency detected in Brazilian satellite feed. Current data offset: 14 mins.</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Benchmarking Table */}
-            <div className="col-span-12 bg-[#182234]/20 border border-[#314368] rounded-xl overflow-hidden shadow-2xl">
-              <div className="p-6 border-b border-[#314368] flex justify-between items-center">
-                <h3 className="text-white text-lg font-bold">Year-Over-Year Source Benchmarking</h3>
-                <button className="text-[#90a4cb] text-xs flex items-center gap-1 hover:text-white transition-colors font-bold uppercase tracking-widest">
-                  <span className="material-symbols-outlined text-sm">download</span> Export CSV
-                </button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse">
-                  <thead>
-                    <tr className="text-[#90a4cb] uppercase text-[10px] tracking-[0.2em] bg-[#182234]/40 font-bold">
-                      <th className="px-6 py-4">Source Provider</th>
-                      <th className="px-6 py-4">Current Value</th>
-                      <th className="px-6 py-4">5-Year Avg</th>
-                      <th className="px-6 py-4">Δ (Delta)</th>
-                      <th className="px-6 py-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#314368]">
-                    {[
-                      { name: 'NOAA Satellite BI-7', current: '0.842 NHI', avg: '0.790 NHI', delta: '+6.58%', type: 'up' },
-                      { name: 'USDA Crop Progress', current: '72% Good/Ex', avg: '68% Good/Ex', delta: '+4.00%', type: 'up' },
-                      { name: 'Sentinel-2 Multispectral', current: '1.22 LAI', avg: '1.35 LAI', delta: '-9.63%', type: 'down' }
-                    ].map((row) => (
-                      <tr key={row.name} className="hover:bg-[#0d59f2]/5 transition-colors cursor-default">
-                        <td className="px-6 py-4 font-medium text-white">{row.name}</td>
-                        <td className="px-6 py-4 text-[#90a4cb] font-mono">{row.current}</td>
-                        <td className="px-6 py-4 text-[#90a4cb] font-mono">{row.avg}</td>
-                        <td className={`px-6 py-4 font-bold ${row.type === 'up' ? 'text-emerald-400' : 'text-rose-400'}`}>{row.delta}</td>
-                        <td className="px-6 py-4">
-                          <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-tight ${row.type === 'up' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
-                            {row.type === 'up' ? 'Reliable' : 'Incomplete'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             </div>
           </div>
 
-          {/* Action Footer */}
-          <footer className="absolute bottom-0 left-0 right-0 bg-[#080b14]/95 backdrop-blur-xl border-t border-[#314368] p-5 flex flex-wrap items-center justify-between shadow-2xl z-20 gap-4">
-            <div className="flex items-center gap-8">
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-emerald-500">verified</span>
-                <div>
-                  <p className="text-[10px] font-bold text-white uppercase tracking-widest leading-none mb-1">Integrity Check</p>
-                  <p className="text-[10px] text-[#90a4cb]">9 Sources Passed Quality Audit</p>
+          {/* Action Footer - UPDATED LOGIC */}
+          <footer className="absolute bottom-0 left-0 right-0 bg-[#080b14]/95 backdrop-blur-xl border-t border-[#314368] p-6 shadow-2xl z-20">
+            <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+              
+              <div className="flex items-center gap-6 w-full lg:w-auto">
+                {/* Commodity Selector */}
+                <div className="flex flex-col gap-1.5 relative group">
+                   <label className="text-[9px] font-black text-[#90a4cb] uppercase tracking-[0.2em] flex items-center gap-2">
+                      <span className="material-symbols-outlined text-xs">grass</span> Commodity Product
+                   </label>
+                   <select 
+                      value={commodity}
+                      onChange={(e) => setCommodity(e.target.value)}
+                      className="bg-[#101622] border border-[#314368] text-white text-sm font-bold rounded-lg py-2.5 px-4 pr-10 appearance-none outline-none focus:border-[#0d59f2] min-w-[180px] cursor-pointer"
+                   >
+                      <option>Corn</option>
+                      <option>Soybeans</option>
+                      <option>Wheat</option>
+                   </select>
+                   <span className="material-symbols-outlined absolute right-3 bottom-2.5 text-[#90a4cb] text-sm pointer-events-none group-hover:text-white transition-colors">expand_more</span>
+                </div>
+
+                {/* Exchange Selector */}
+                <div className="flex flex-col gap-1.5 relative group">
+                   <label className="text-[9px] font-black text-[#90a4cb] uppercase tracking-[0.2em] flex items-center gap-2">
+                      <span className="material-symbols-outlined text-xs">account_balance</span> Futures Exchange
+                   </label>
+                   <select 
+                      value={exchange}
+                      onChange={(e) => setExchange(e.target.value)}
+                      className="bg-[#101622] border border-[#314368] text-white text-sm font-bold rounded-lg py-2.5 px-4 pr-10 appearance-none outline-none focus:border-[#0d59f2] min-w-[200px] cursor-pointer"
+                   >
+                      <option>CBOT (USA)</option>
+                      <option>DCE (China)</option>
+                      <option>MATIF (Europe)</option>
+                   </select>
+                   <span className="material-symbols-outlined absolute right-3 bottom-2.5 text-[#90a4cb] text-sm pointer-events-none group-hover:text-white transition-colors">expand_more</span>
                 </div>
               </div>
-              <div className="h-8 w-px bg-[#314368]"></div>
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-[#0d59f2]">analytics</span>
-                <div>
-                  <p className="text-[10px] font-bold text-white uppercase tracking-widest leading-none mb-1">Current Model</p>
-                  <p className="text-[10px] text-[#90a4cb]">SOY-24-BRAZIL-QUANT</p>
-                </div>
+
+              {/* Dynamic Region Display */}
+              <div className="flex-1 flex items-center justify-center lg:justify-end gap-6">
+                 <div className="h-10 w-px bg-[#314368] hidden lg:block"></div>
+                 
+                 <div className="flex flex-col items-end">
+                    <span className="text-[9px] font-black text-[#90a4cb] uppercase tracking-[0.2em] mb-1">Target Major Production Area (70% Driver)</span>
+                    <div className="flex items-center gap-3 bg-[#0d59f2]/10 border border-[#0d59f2]/30 px-4 py-2 rounded-lg">
+                       <span className="material-symbols-outlined text-[#0d59f2] animate-pulse">polyline</span>
+                       <div>
+                          <p className="text-sm font-bold text-white leading-none">{vectorRegion.name}</p>
+                          <p className="text-[9px] text-[#90a4cb] font-mono mt-0.5">Centroid: {vectorRegion.coords}</p>
+                       </div>
+                    </div>
+                 </div>
+
+                 <button className="h-11 px-6 rounded-lg bg-[#0d59f2] text-white hover:bg-[#0d59f2]/90 transition-all text-xs font-black uppercase tracking-widest shadow-lg shadow-[#0d59f2]/25 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-lg">layers</span>
+                    Load Vector Boundary
+                 </button>
               </div>
-            </div>
-            <div className="flex gap-4">
-              <button className="px-6 py-2.5 rounded-lg bg-[#182234] border border-[#314368] text-white hover:bg-[#314368] transition-all text-xs font-bold uppercase tracking-widest flex items-center gap-2">
-                <span className="material-symbols-outlined text-lg">check_circle</span>
-                Verify Data
-              </button>
-              <button className="px-8 py-2.5 rounded-lg bg-[#0d59f2] text-white hover:bg-[#0d59f2]/90 transition-all text-xs font-bold uppercase tracking-widest shadow-lg shadow-[#0d59f2]/25">
-                Include in Analysis
-              </button>
+
             </div>
           </footer>
         </main>
