@@ -9,10 +9,13 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # Install system dependencies
+# Added libgomp1 for potential ML libraries and curl for health checks
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    libgomp1 \
+    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,4 +30,5 @@ COPY . .
 EXPOSE 8000
 
 # Command to run the application
+# Using 0.0.0.0 to ensure it binds to all interfaces for Railway
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
