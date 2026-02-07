@@ -1,5 +1,5 @@
-
 import React from 'react';
+import { SystemClock } from './SystemClock';
 
 interface RiskControlProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'api') => void;
@@ -25,12 +25,12 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
     <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
       {/* Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
-        <div className="flex items-center gap-3 w-80 cursor-pointer" onClick={() => onNavigate('hub')}>
-          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20">
+        <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
+          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col">
-            <h1 className="text-xl font-bold tracking-tight text-white leading-none">QuantAgrify</h1>
+          <div className="flex flex-col text-left leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
             <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
@@ -49,7 +49,8 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
         </div>
 
         <div className="flex items-center gap-4 w-80 justify-end">
-          <button className="text-[#90a4cb] hover:text-[#0d59f2] transition-colors"><span className="material-symbols-outlined">notifications</span></button>
+          <SystemClock />
+          <div className="h-8 w-px bg-[#222f49] mx-2"></div>
           <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>

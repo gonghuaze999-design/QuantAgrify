@@ -1,5 +1,5 @@
-
 import React from 'react';
+import { SystemClock } from './SystemClock';
 
 interface FeatureEngineeringProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'api') => void;
@@ -49,7 +49,8 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
         </div>
 
         <div className="flex items-center gap-4 w-80 justify-end">
-          <button className="text-[#90a4cb] hover:text-[#0d59f2] transition-colors"><span className="material-symbols-outlined">notifications</span></button>
+          <SystemClock />
+          <div className="h-8 w-px bg-[#222f49] mx-2"></div>
           <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>
@@ -66,7 +67,7 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
             <span className="text-slate-600 text-sm font-medium">/</span>
             <span className="text-[#0d59f2] text-sm font-bold flex items-center gap-2">
               Feature Engineering
-              <span className="px-2 py-0.5 rounded text-[10px] bg-[#0d59f2]/10 border border-[#0d59f2]/20 uppercase">v2.4.1</span>
+              <span className="px-2 py-0.5 rounded text-[10px] bg-[#0d59f2]/10 border border-[#0d59f2]/20 uppercase">v2.9.0</span>
             </span>
           </div>
         </div>

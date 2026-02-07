@@ -1,5 +1,5 @@
-
 import React from 'react';
+import { SystemClock } from './SystemClock';
 
 interface InDepthAnalyticsProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -58,18 +58,9 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
         </nav>
 
         <div className="flex items-center justify-end gap-4 w-1/4">
-          <div className="hidden xl:flex items-center rounded-lg bg-[#182234] border border-[#222f49] px-3 py-1.5 transition-colors max-w-[200px]">
-            <span className="material-symbols-outlined text-[#90a4cb] text-lg">search</span>
-            <input className="w-full border-none bg-transparent text-xs text-white placeholder:text-[#90a4cb] focus:ring-0" placeholder="Search factors..." />
-          </div>
-          <div className="flex gap-1">
-            <button className="p-2 text-[#90a4cb] hover:text-white transition-colors"><span className="material-symbols-outlined">settings</span></button>
-            <button className="p-2 text-[#90a4cb] hover:text-white relative">
-              <span className="material-symbols-outlined">notifications</span>
-              <span className="absolute top-2 right-2.5 size-2 bg-[#0d59f2] rounded-full border-2 border-[#0a0c10]"></span>
-            </button>
-          </div>
-          <div className="h-8 w-8 rounded-full bg-slate-800 border border-[#0d59f2]/50 flex items-center justify-center">
+          <SystemClock />
+          <div className="h-8 w-px bg-[#222f49] mx-2"></div>
+          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>
         </div>

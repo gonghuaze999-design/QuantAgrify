@@ -1,29 +1,17 @@
 import React, { useState, useRef } from 'react';
+import { SystemClock } from './SystemClock';
 
 interface WelcomeHubProps {
   onNavigate: (view: 'dataSource' | 'algorithm' | 'cockpit' | 'api' | 'userMgmt' | 'login') => void;
 }
 
 export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [userAvatar, setUserAvatar] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const navItems = [
     { id: 'dataSource', label: 'Data Source', icon: 'database', cardIcon: 'database_off', desc: 'Unified stream management for multispectral imagery, weather grids, and historical series.' },
     { id: 'algorithm', label: 'Algorithm', icon: 'precision_manufacturing', cardIcon: 'precision_manufacturing', desc: 'Orchestrate hybrid intelligence pipelines using Bayesian inference and XGBoost ensembles.' },
     { id: 'cockpit', label: 'Cockpit', icon: 'monitoring', cardIcon: 'monitoring', desc: 'Real-time multi-asset oversight with proprietary signal alerts and precision backtesting.' },
     { id: 'api', label: 'API Console', icon: 'terminal', cardIcon: 'terminal', desc: 'Secure programmatic infrastructure for large-scale data harvesting and third-party delivery.' }
   ];
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setUserAvatar(reader.result as string);
-      reader.readAsDataURL(file);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-[#05070a] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col relative selection:bg-[#0d59f2]/30">
@@ -62,94 +50,12 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
           ))}
         </div>
         
-        {/* Right Side: User Profile and Status */}
-        <div className="flex items-center gap-6 w-80 justify-end">
-          <div className="hidden md:flex items-center gap-4 bg-white/[0.03] px-5 py-2 rounded-full border border-white/5">
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#0bda5e] shadow-[0_0_8px_#0bda5e]"></span>
-              <span className="text-[10px] font-black text-[#94a3b8] uppercase tracking-widest font-mono">Engine: Online</span>
-            </div>
-            <div className="h-3 w-px bg-white/10"></div>
-            <span className="text-[10px] font-black text-[#94a3b8] uppercase tracking-widest font-mono">Ping: 12ms</span>
-          </div>
-
-          <div className="relative">
-            <button 
-              onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-3 pl-4 border-l border-white/10 group transition-all"
-            >
-              <div className="text-right hidden sm:block">
-                <p className="text-[11px] font-bold text-white uppercase tracking-tighter">Chief Strategist</p>
-                <p className="text-[9px] text-[#0d59f2] font-black uppercase font-mono">Access: Level 7</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#0d59f2] to-[#00f2ff] p-[1px] shadow-lg shadow-[#0d59f2]/20 group-hover:rotate-3 transition-transform overflow-hidden">
-                <div className="w-full h-full bg-[#080b14] rounded-[9px] flex items-center justify-center overflow-hidden">
-                  {userAvatar ? (
-                    <img src={userAvatar} className="w-full h-full object-cover" alt="User" />
-                  ) : (
-                    <span className="material-symbols-outlined text-[#0d59f2] text-xl">account_circle</span>
-                  )}
-                </div>
-              </div>
-            </button>
-
-            {showUserMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)}></div>
-                <div className="absolute right-0 mt-3 w-72 bg-[#0d1117]/95 backdrop-blur-2xl border border-[#314368] rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                  <div className="p-6 border-b border-white/5 bg-gradient-to-b from-white/5 to-transparent">
-                    <div className="flex items-center gap-4 mb-4">
-                       <div className="relative size-16 rounded-2xl overflow-hidden border border-[#0d59f2]/30 group/avatar">
-                          {userAvatar ? (
-                            <img src={userAvatar} className="w-full h-full object-cover" alt="Profile" />
-                          ) : (
-                            <div className="w-full h-full bg-[#161d2b] flex items-center justify-center">
-                              <span className="material-symbols-outlined text-3xl text-[#90a4cb]">person</span>
-                            </div>
-                          )}
-                          <button 
-                            onClick={() => fileInputRef.current?.click()}
-                            className="absolute inset-0 bg-black/60 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center"
-                          >
-                            <span className="material-symbols-outlined text-white text-lg">edit</span>
-                          </button>
-                          <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
-                       </div>
-                       <div>
-                         <p className="text-sm font-bold text-white uppercase tracking-tight">Admin Principal</p>
-                         <p className="text-[10px] text-[#90a4cb] font-mono mt-0.5">mcfly_hq_alpha@quant.io</p>
-                         <span className="mt-2 inline-flex items-center px-2 py-0.5 rounded text-[8px] font-black uppercase bg-[#0d59f2]/10 text-[#0d59f2] border border-[#0d59f2]/20">Superuser</span>
-                       </div>
-                    </div>
-                  </div>
-                  <div className="p-2">
-                    <button 
-                      onClick={() => { onNavigate('userMgmt'); setShowUserMenu(false); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 text-[#90a4cb] hover:text-white transition-all text-xs font-bold uppercase tracking-widest"
-                    >
-                      <span className="material-symbols-outlined text-lg">manage_accounts</span>
-                      Admin User Management
-                    </button>
-                    <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 text-[#90a4cb] hover:text-white transition-all text-xs font-bold uppercase tracking-widest">
-                      <span className="material-symbols-outlined text-lg">settings</span>
-                      Platform Preferences
-                    </button>
-                    <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 text-[#90a4cb] hover:text-white transition-all text-xs font-bold uppercase tracking-widest">
-                      <span className="material-symbols-outlined text-lg">security</span>
-                      MFA & Security Audit
-                    </button>
-                    <div className="h-px bg-white/5 my-2 mx-4"></div>
-                    <button 
-                      onClick={() => onNavigate('login')}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-rose-500/10 text-rose-400 transition-all text-xs font-bold uppercase tracking-widest"
-                    >
-                      <span className="material-symbols-outlined text-lg">logout</span>
-                      Terminate Session
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
+        {/* Right Side: Standardized Clock and User Profile */}
+        <div className="flex items-center justify-end gap-4 w-80">
+          <SystemClock />
+          <div className="h-8 w-px bg-[#222f49] mx-2"></div>
+          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden cursor-default">
+            <span className="material-symbols-outlined text-sm">person</span>
           </div>
         </div>
       </nav>

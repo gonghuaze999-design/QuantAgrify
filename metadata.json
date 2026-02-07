@@ -1,5 +1,11 @@
+
 {
-  "description": "A high-fidelity quantitative analysis platform for agricultural commodity futures, integrating satellite imagery, weather data, and market sentiment with AI-driven risk management.",
-  "requestFramePermissions": [],
-  "name": "QuantAgrify"
+  "description": "QuantAgrify Professional LTS - Version 2.9.5. Stable release candidate with full cross-module clock synchronization and robust API connection management.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "name": "QuantAgrify v2.9.5 LTS",
+  "version": "2.9.5-stable"
 }

@@ -1,5 +1,5 @@
-
 import React from 'react';
+import { SystemClock } from './SystemClock';
 
 interface MultiFactorFusionProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'api') => void;
@@ -49,7 +49,8 @@ export const MultiFactorFusion: React.FC<MultiFactorFusionProps> = ({ onNavigate
         </div>
 
         <div className="flex items-center gap-4 w-80 justify-end">
-          <button className="text-[#90a4cb] hover:text-[#0d59f2] transition-colors"><span className="material-symbols-outlined">notifications</span></button>
+          <SystemClock />
+          <div className="h-8 w-px bg-[#222f49] mx-2"></div>
           <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>

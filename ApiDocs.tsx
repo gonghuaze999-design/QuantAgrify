@@ -1,5 +1,5 @@
-
 import React from 'react';
+import { SystemClock } from './SystemClock';
 
 interface ApiDocsProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'algorithm' | 'cockpit' | 'api' | 'apiDocs' | 'apiLogs') => void;
@@ -46,9 +46,10 @@ export const ApiDocs: React.FC<ApiDocsProps> = ({ onNavigate }) => {
           ))}
         </div>
 
-        <div className="flex items-center gap-4 w-80 justify-end">
-          <button className="text-[#90a4cb] hover:text-white transition-colors"><span className="material-symbols-outlined">notifications</span></button>
-          <div className="size-8 rounded-full bg-[#182234] border border-[#314368] flex items-center justify-center overflow-hidden">
+        <div className="flex items-center justify-end gap-4 w-80">
+          <SystemClock />
+          <div className="h-8 w-px bg-[#222f49] mx-2"></div>
+          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>
         </div>
