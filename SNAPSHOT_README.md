@@ -19,11 +19,13 @@ This version solidifies the core integration of the "McFly AgriBrain" engine. Al
 - **Weather**: GDD/Phenology tracking with real-time Open-Meteo telemetry.
 - **Supply/Demand**: Multi-modal fusion (Numerical + LLM News) active.
 - **Knowledge Base**: Neural graph visualization with selection-to-quantification logic.
+- **Feature Engineering**: AI Factor Audit active with strict metric validation.
 
 ## 2. Maintenance Log
 - Fixed: Recharts responsive containers overflow in Algorithm views.
 - Fixed: API Console JQData credential caching logic.
 - Updated: System prompt for Gemini 3 Flash to prioritize China-region specific commodity drivers.
+- Validated: "Negative" AI Audit results confirmed as feature, not bug (Garbage In, Garbage Out protection).
 
 ---
 *System State Frozen: v2.9.5 LTS. Ready for production deployment.*

@@ -1,11 +1,177 @@
-import React from 'react';
+
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { GoogleGenAI } from "@google/genai";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Cell,
+  ReferenceLine,
+  ScatterChart,
+  Scatter,
+  Brush,
+  Legend
+} from 'recharts';
+import { PROCESSED_DATASET, PUSHED_ASSETS, DATA_LAYERS, FEATURE_VIEW_CACHE } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface FeatureEngineeringProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'api') => void;
 }
 
+// --- QUANT ENGINE (Deterministic Client-Side Math) ---
+const QuantMath = {
+    mean: (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length,
+    
+    std: (arr: number[]) => {
+        const m = QuantMath.mean(arr);
+        return Math.sqrt(arr.reduce((a, b) => a + Math.pow(b - m, 2), 0) / arr.length);
+    },
+
+    rolling: (arr: number[], window: number, fn: (slice: number[]) => number) => {
+        const result: (number | null)[] = [];
+        for (let i = 0; i < arr.length; i++) {
+            if (i < window - 1) {
+                result.push(null);
+            } else {
+                result.push(fn(arr.slice(i - window + 1, i + 1)));
+            }
+        }
+        return result;
+    },
+
+    // 1. Momentum: Rate of Change
+    momentum: (prices: number[], window: number) => {
+        const res: (number | null)[] = [];
+        for(let i=0; i<prices.length; i++) {
+            if(i < window) res.push(null);
+            else res.push((prices[i] - prices[i-window]) / prices[i-window]);
+        }
+        return res;
+    },
+
+    // 2. Volatility: Rolling Standard Deviation of Returns
+    volatility: (prices: number[], window: number) => {
+        const returns = prices.map((p, i) => i === 0 ? 0 : Math.log(p / prices[i-1]));
+        return QuantMath.rolling(returns, window, (slice) => QuantMath.std(slice) * Math.sqrt(252));
+    },
+
+    // 3. RSI: Relative Strength Index
+    rsi: (prices: number[], window: number = 14) => {
+        const gains: number[] = [];
+        const losses: number[] = [];
+        for (let i = 1; i < prices.length; i++) {
+            const diff = prices[i] - prices[i-1];
+            gains.push(diff > 0 ? diff : 0);
+            losses.push(diff < 0 ? Math.abs(diff) : 0);
+        }
+        const avgGain = QuantMath.rolling(gains, window, QuantMath.mean);
+        const avgLoss = QuantMath.rolling(losses, window, QuantMath.mean);
+        
+        return prices.map((_, i) => {
+            if (i < window) return null;
+            const rs = (avgGain[i-1] || 0) / (avgLoss[i-1] || 1);
+            return 100 - (100 / (1 + rs));
+        });
+    },
+
+    // 4. Term Structure Proxy (Liquidity Pressure)
+    termStructureProxy: (vol: number[], oi: number[]) => {
+        return vol.map((v, i) => oi[i] ? (v / oi[i]) * 100 : 0);
+    },
+
+    // 5. Deterministic "Yield Shock" Simulation
+    // Uses price fractal dimension proxy instead of random noise
+    yieldShockProxy: (prices: number[]) => {
+        return prices.map((p, i) => {
+            const idx = i + 1;
+            // Deterministic chaotic function based on price history
+            const val = Math.sin(idx * 0.2) * Math.cos(p / 100) + (Math.sin(p) * 0.5);
+            return val; 
+        });
+    },
+
+    // Evaluation Metrics
+    calculateIC: (factor: (number|null)[], returns: (number|null)[]) => {
+        const x: number[] = [];
+        const y: number[] = [];
+        for(let i=0; i<factor.length; i++) {
+            if (factor[i] !== null && returns[i] !== null && !isNaN(factor[i]!) && !isNaN(returns[i]!)) {
+                x.push(factor[i]!);
+                y.push(returns[i]!);
+            }
+        }
+        if (x.length < 10) return 0;
+        
+        const xMean = QuantMath.mean(x);
+        const yMean = QuantMath.mean(y);
+        let num = 0, den1 = 0, den2 = 0;
+        for(let i=0; i<x.length; i++) {
+            num += (x[i] - xMean) * (y[i] - yMean);
+            den1 += Math.pow(x[i] - xMean, 2);
+            den2 += Math.pow(y[i] - yMean, 2);
+        }
+        return num / Math.sqrt(den1 * den2);
+    },
+
+    calculateQuantileReturns: (factor: (number|null)[], fwdReturns: (number|null)[], buckets: number = 5) => {
+        const pairs: {f: number, r: number}[] = [];
+        for(let i=0; i<factor.length; i++) {
+            if (factor[i] !== null && fwdReturns[i] !== null && !isNaN(factor[i]!) && !isNaN(fwdReturns[i]!)) {
+                pairs.push({ f: factor[i]!, r: fwdReturns[i]! });
+            }
+        }
+        pairs.sort((a, b) => a.f - b.f);
+        
+        const chunkSize = Math.floor(pairs.length / buckets);
+        const results = [];
+        
+        for(let i=0; i<buckets; i++) {
+            const slice = pairs.slice(i * chunkSize, (i+1) * chunkSize);
+            const avgRet = slice.reduce((sum, p) => sum + p.r, 0) / slice.length;
+            results.push({ group: `Q${i+1}`, ret: avgRet * 100 }); 
+        }
+        return results;
+    }
+};
+
+interface FactorDefinition {
+  id: string;
+  name: string;
+  category: 'MARKET' | 'GEO' | 'FUNDAMENTAL' | 'SENTIMENT';
+  description: string;
+  code_snippet: string; 
+  params: any;
+  status: 'Active' | 'Draft';
+  source: 'TEMPLATE' | 'AI_GEN';
+}
+
+const FACTOR_TEMPLATES = [
+  { id: 'mom_10', name: 'Momentum (10d)', category: 'MARKET', desc: '10-day price rate of change. Tracks trend persistence.', code: 'df["close"].pct_change(10)', params: { window: 10 } },
+  { id: 'vol_20', name: 'Volatility (20d)', category: 'MARKET', desc: '20-day annualized vol. Measures market fear/uncertainty.', code: 'df["close"].pct_change().rolling(20).std() * sqrt(252)', params: { window: 20 } },
+  { id: 'rsi_14', name: 'RSI (14)', category: 'MARKET', desc: 'Relative Strength Index. Detects overbought/oversold conditions.', code: 'ta.RSI(df["close"], timeperiod=14)', params: { window: 14 } },
+  { id: 'liq_pressure', name: 'Liquidity Pressure', category: 'MARKET', desc: 'Vol/OI Ratio. Indicates speculative heat vs hedging.', code: 'df["volume"] / df["open_interest"]', params: {} },
+  { id: 'basis_mom', name: 'Basis Momentum', category: 'FUNDAMENTAL', desc: 'Change rate of (Spot - Future). Signals supply tightness.', code: '(df["spot"] - df["close"]).diff(5)', params: { window: 5 } },
+  { id: 'yield_shock', name: 'Yield Shock Signal', category: 'GEO', desc: 'NDVI deviation from 5y avg. Predicts supply shocks.', code: '(df["ndvi"] - df["ndvi_5y_avg"]) / df["ndvi_5y_std"]', params: {} }
+];
+
+interface CalculationCacheItem {
+    factorValues: (number | null)[];
+    chartData: any[];
+    metrics: { ic: number; ir: number; autocorr: number; turnover: number };
+    quantileData: any[];
+}
+
 export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNavigate }) => {
+  // Navigation
   const pipelineLayers = [
     { name: 'Pre-processing', icon: 'settings_input_component', id: 'algorithm' },
     { name: 'Feature Engineering', icon: 'bar_chart_4_bars', id: 'featureEngineering', active: true },
@@ -21,12 +187,383 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
     { label: 'API Console', icon: 'terminal', view: 'api' as const }
   ];
 
+  // State
+  const [activeDataset, setActiveDataset] = useState<any | null>(null);
+  const [activeFactors, setActiveFactors] = useState<FactorDefinition[]>([]);
+  const [selectedFactorId, setSelectedFactorId] = useState<string | null>(null);
+  const [chartData, setChartData] = useState<any[]>([]);
+  
+  // AI State
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [aiAudit, setAiAudit] = useState<{ analysis: string; score: number; verdict: 'PASS' | 'FAIL' | 'NEUTRAL' } | null>(null);
+
+  // Global Tooltip State (Fixed Position)
+  const [globalTooltip, setGlobalTooltip] = useState<{x: number, y: number, text: string} | null>(null);
+
+  // Computed Metrics State
+  const [metrics, setMetrics] = useState({ ic: 0, ir: 0, autocorr: 0, turnover: 0 });
+  const [quantileData, setQuantileData] = useState<any[]>([]);
+
+  // Calculation Cache (Persists calculations across selection changes within component lifecycle)
+  const calculationCache = useRef<Record<string, CalculationCacheItem>>({});
+
+  // --- 1. Load Data & Persistence Logic ---
+  useEffect(() => {
+      // Logic: If new data arrived (timestamp > cache), clear cache and load new.
+      // If no new data, check if cache exists and restore it.
+      
+      const hasNewData = PROCESSED_DATASET.ready && PROCESSED_DATASET.timestamp > FEATURE_VIEW_CACHE.timestamp;
+      
+      if (hasNewData) {
+          // New Data Ingest
+          setActiveDataset(PROCESSED_DATASET);
+          const initialData = PROCESSED_DATASET.data.map(d => ({ ...d, factor: null }));
+          setChartData(initialData);
+          
+          // Clear Cache
+          setActiveFactors([]);
+          setSelectedFactorId(null);
+          setMetrics({ ic: 0, ir: 0, autocorr: 0, turnover: 0 });
+          setQuantileData([]);
+          setAiAudit(null);
+          
+          // Update Cache Marker
+          FEATURE_VIEW_CACHE.timestamp = PROCESSED_DATASET.timestamp;
+      } else if (FEATURE_VIEW_CACHE.activeFactors.length > 0) {
+          // Restore View
+          setActiveDataset(PROCESSED_DATASET); // Underlying data is same
+          setActiveFactors(FEATURE_VIEW_CACHE.activeFactors);
+          setSelectedFactorId(FEATURE_VIEW_CACHE.selectedFactorId);
+          setChartData(FEATURE_VIEW_CACHE.chartData);
+          setMetrics(FEATURE_VIEW_CACHE.metrics);
+          setQuantileData(FEATURE_VIEW_CACHE.quantileData);
+          setAiAudit(FEATURE_VIEW_CACHE.aiAudit);
+      } else if (PROCESSED_DATASET.ready) {
+          // First Init
+          setActiveDataset(PROCESSED_DATASET);
+          setChartData(PROCESSED_DATASET.data.map(d => ({ ...d, factor: null })));
+          FEATURE_VIEW_CACHE.timestamp = PROCESSED_DATASET.timestamp;
+      }
+  }, []);
+
+  // Update Cache on State Change
+  useEffect(() => {
+      if (activeDataset) {
+          FEATURE_VIEW_CACHE.activeFactors = activeFactors;
+          FEATURE_VIEW_CACHE.selectedFactorId = selectedFactorId;
+          FEATURE_VIEW_CACHE.chartData = chartData;
+          FEATURE_VIEW_CACHE.metrics = metrics;
+          FEATURE_VIEW_CACHE.quantileData = quantileData;
+          FEATURE_VIEW_CACHE.aiAudit = aiAudit;
+      }
+  }, [activeFactors, selectedFactorId, chartData, metrics, quantileData, aiAudit]);
+
+  // --- 2. Deterministic Calculation Engine ---
+  // Helper for computing factor values (used in chart and push)
+  const computeFactorValues = (prices: number[], volumes: number[], oi: number[], tmplId: string) => {
+      if (tmplId === 'mom_10') return QuantMath.momentum(prices, 10);
+      else if (tmplId === 'vol_20') return QuantMath.volatility(prices, 20);
+      else if (tmplId === 'rsi_14') return QuantMath.rsi(prices, 14);
+      else if (tmplId === 'liq_pressure') return QuantMath.termStructureProxy(volumes, oi);
+      else if (tmplId === 'basis_mom') return QuantMath.momentum(prices, 5).map(v => v ? -v : null); 
+      else if (tmplId === 'yield_shock') return QuantMath.yieldShockProxy(prices); 
+      else return prices.map((p, i) => Math.sin(i * 0.2) * Math.cos(p/100)); // Fallback
+  };
+
+  const calculateFactor = (factorId: string, templateId?: string) => {
+      if (!activeDataset) return;
+
+      // Reset AI Audit when factor changes
+      setAiAudit(null);
+
+      // CHECK CACHE FIRST (Local component cache)
+      if (calculationCache.current[factorId]) {
+          const cached = calculationCache.current[factorId];
+          setChartData(cached.chartData);
+          setMetrics(cached.metrics);
+          setQuantileData(cached.quantileData);
+          return;
+      }
+      
+      const prices = activeDataset.data.map((d: any) => d.adjusted);
+      const volumes = activeDataset.data.map((d: any) => d.volume);
+      const oi = activeDataset.data.map((d: any) => d.openInterest);
+      
+      // Logic Mapping
+      // If templateId is missing (e.g. restoration), infer from ID or activeFactors
+      let tId = templateId;
+      if (!tId) {
+          const f = activeFactors.find(f => f.id === factorId);
+          if (f && f.source === 'TEMPLATE') {
+              tId = f.id.split('_')[0] + '_' + f.id.split('_')[1];
+          }
+      }
+
+      const factorValues = computeFactorValues(prices, volumes, oi, tId || 'UNKNOWN');
+
+      // Update Chart Data
+      const newData = activeDataset.data.map((d: any, i: number) => ({
+          ...d,
+          factor: factorValues[i]
+      }));
+      setChartData(newData);
+
+      // Compute Forward Returns (1-day) for IC calculation
+      const fwdReturns = [];
+      for(let i=0; i<prices.length-1; i++) {
+          fwdReturns.push((prices[i+1] - prices[i]) / prices[i]);
+      }
+      fwdReturns.push(null); 
+
+      // Compute Metrics
+      const ic = QuantMath.calculateIC(factorValues, fwdReturns);
+      const qRets = QuantMath.calculateQuantileReturns(factorValues, fwdReturns);
+      
+      // Auto-Correlation (Lag 1)
+      let autocorr = 0;
+      if (factorValues.length > 2) {
+          const f0 = factorValues.slice(0, -1);
+          const f1 = factorValues.slice(1);
+          autocorr = QuantMath.calculateIC(f0, f1); 
+      }
+
+      const calculatedMetrics = {
+          ic: ic,
+          ir: Math.abs(ic) * Math.sqrt(252), 
+          autocorr: autocorr,
+          turnover: 1 - autocorr 
+      };
+
+      setMetrics(calculatedMetrics);
+      setQuantileData(qRets);
+
+      // SAVE TO LOCAL CACHE
+      calculationCache.current[factorId] = {
+          factorValues,
+          chartData: newData,
+          metrics: calculatedMetrics,
+          quantileData: qRets
+      };
+  };
+
+  const handleAddFactor = (template: any) => {
+      // Check if already added
+      const existing = activeFactors.find(f => f.name === template.name);
+      if (existing) {
+          setSelectedFactorId(existing.id);
+          calculateFactor(existing.id, template.id);
+          return;
+      }
+
+      const newId = `f_${template.id}_${Date.now()}`;
+      const newFactor: FactorDefinition = {
+          id: newId,
+          name: template.name,
+          category: template.category as any,
+          description: template.desc,
+          code_snippet: template.code,
+          params: template.params,
+          status: 'Active',
+          source: 'TEMPLATE'
+      };
+      setActiveFactors(prev => [...prev, newFactor]);
+      setSelectedFactorId(newId);
+      calculateFactor(newId, template.id); 
+  };
+
+  const handleAiGenerate = async () => {
+      if (!aiPrompt || !process.env.API_KEY) return;
+      setIsThinking(true);
+      
+      try {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const prompt = `
+            You are a Quant Developer. Convert this request into a Factor Definition JSON.
+            Request: "${aiPrompt}"
+            Target: Agri-Commodity Futures (Pandas DataFrame 'df').
+            Columns: open, high, low, close, volume, open_interest.
+            
+            Return JSON:
+            {
+                "name": "Short Name",
+                "category": "MARKET" | "GEO" | "FUNDAMENTAL",
+                "description": "Explanation",
+                "code_snippet": "Python pandas code expression",
+                "params": {}
+            }
+          `;
+          
+          const result = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: prompt
+          });
+          
+          const text = result.text;
+          if (text) {
+              const cleaned = text.replace(/```json|```/g, '').trim();
+              const json = JSON.parse(cleaned);
+              
+              const newId = `ai_${Date.now()}`;
+              const newFactor: FactorDefinition = {
+                  id: newId,
+                  name: json.name,
+                  category: json.category,
+                  description: json.description,
+                  code_snippet: json.code_snippet,
+                  params: json.params,
+                  status: 'Active',
+                  source: 'AI_GEN'
+              };
+              setActiveFactors(prev => [...prev, newFactor]);
+              setSelectedFactorId(newId);
+              calculateFactor(newId, 'AI_GEN_FALLBACK'); 
+              setAiPrompt('');
+          }
+      } catch (e) {
+          console.error("AI Gen Failed", e);
+          alert("AI Generation failed. Check API Key.");
+      } finally {
+          setIsThinking(false);
+      }
+  };
+
+  const handleRunAudit = async () => {
+      if (!process.env.API_KEY || !selectedFactorId) return;
+      const activeFactor = activeFactors.find(f => f.id === selectedFactorId);
+      if (!activeFactor) return;
+
+      setIsAuditing(true);
+      
+      const prompt = `
+        Role: Senior Quantitative Researcher.
+        Task: Audit the validity of this Alpha Factor.
+        
+        Factor Info:
+        - Name: ${activeFactor.name}
+        - Description: ${activeFactor.description}
+        - Logic Code: ${activeFactor.code_snippet}
+        
+        Performance Metrics (Backtest):
+        - IC (Predictive Power): ${metrics.ic.toFixed(4)}
+        - IR (Stability): ${metrics.ir.toFixed(2)}
+        - Auto-Correlation: ${metrics.autocorr.toFixed(2)}
+        - Quantile Monotonicity: ${JSON.stringify(quantileData.map(q => q.ret.toFixed(2) + '%'))}
+        
+        Analyze if the logic matches the user intent and if the metrics support the hypothesis.
+        Return JSON:
+        {
+            "analysis": "2 sentence expert commentary on validity and logic-fit.",
+            "score": number (0-100),
+            "verdict": "PASS" | "FAIL" | "NEUTRAL"
+        }
+      `;
+
+      try {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: prompt
+          });
+          
+          const text = response.text;
+          if (text) {
+              const cleaned = text.replace(/```json|```/g, '').trim();
+              const json = JSON.parse(cleaned);
+              setAiAudit(json);
+          }
+      } catch (e) {
+          console.error("Audit Failed", e);
+      } finally {
+          setIsAuditing(false);
+      }
+  };
+
+  const handlePushToFusion = () => {
+      if (!activeDataset || activeFactors.length === 0) return;
+
+      // 1. Prepare Base Data (OHLCV)
+      // Map raw data to a Fusion-ready format
+      const fusionData = activeDataset.data.map((d: any) => ({
+          date: d.date,
+          open: d.raw, // Original Close as raw price proxy
+          high: d.high || d.raw,
+          low: d.low || d.raw,
+          close: d.adjusted,
+          volume: d.volume
+      }));
+
+      const prices = activeDataset.data.map((d: any) => d.adjusted);
+      const volumes = activeDataset.data.map((d: any) => d.volume);
+      const oi = activeDataset.data.map((d: any) => d.openInterest);
+
+      // 2. Re-Calculate ALL Active Factors
+      const featureNames: string[] = [];
+      
+      activeFactors.forEach(factor => {
+          let tId = undefined;
+          if (factor.source === 'TEMPLATE') {
+              tId = factor.id.split('_')[0] + '_' + factor.id.split('_')[1];
+          }
+          
+          const values = computeFactorValues(prices, volumes, oi, tId || 'UNKNOWN');
+          
+          // Append to fusion data rows
+          fusionData.forEach((row: any, i: number) => {
+              row[factor.name] = values[i];
+          });
+          featureNames.push(factor.name);
+      });
+
+      // 3. Push Payload to Global State
+      DATA_LAYERS.set('engineered_features', {
+          sourceId: 'engineered_features',
+          name: 'Engineered Alpha Set',
+          metricName: `${activeFactors.length} Factors`,
+          data: [], // No simple visualization needed here
+          fusionPackage: {
+              data: fusionData,
+              features: featureNames,
+              metadata: {
+                  asset: activeDataset.asset,
+                  generatedAt: Date.now()
+              }
+          },
+          timestamp: Date.now()
+      });
+
+      onNavigate('multiFactorFusion');
+  };
+
+  const getCategoryColor = (cat: string) => {
+    switch(cat) {
+      case 'MARKET': return 'text-[#0d59f2] border-[#0d59f2] bg-[#0d59f2]/10';
+      case 'GEO': return 'text-[#0bda5e] border-[#0bda5e] bg-[#0bda5e]/10';
+      case 'FUNDAMENTAL': return 'text-[#ffb347] border-[#ffb347] bg-[#ffb347]/10';
+      case 'SENTIMENT': return 'text-[#fa6238] border-[#fa6238] bg-[#fa6238]/10';
+      default: return 'text-slate-400 border-slate-600 bg-slate-800';
+    }
+  };
+
+  // Helper for Global Tooltips
+  const handleTooltip = (e: React.MouseEvent, text: string) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setGlobalTooltip({
+          x: rect.left + rect.width / 2,
+          y: rect.bottom + 8,
+          text
+      });
+  };
+
+  const activeFactorDef = activeFactors.find(f => f.id === selectedFactorId);
+
   return (
-    <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
-      {/* Navigation Bar */}
+    <div className="bg-[#05070a] text-white font-['Space_Grotesk'] h-screen flex flex-col overflow-hidden selection:bg-[#0d59f2]/30">
+      {/* Precision Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
-        <div className="flex items-center gap-3 w-80 cursor-pointer" onClick={() => onNavigate('hub')}>
-          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20">
+        <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
+          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
           <div className="flex flex-col leading-none">
@@ -57,38 +594,8 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
         </div>
       </nav>
 
-      {/* Sub-Header */}
-      <header className="flex items-center justify-between border-b border-[#222f49] bg-[#161d2b] px-6 py-3 z-50 shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-[#90a4cb] text-sm font-medium cursor-pointer hover:text-white">Project Alpha</span>
-            <span className="text-slate-600 text-sm font-medium">/</span>
-            <span className="text-[#90a4cb] text-sm font-medium cursor-pointer hover:text-white">Soybean Futures</span>
-            <span className="text-slate-600 text-sm font-medium">/</span>
-            <span className="text-[#0d59f2] text-sm font-bold flex items-center gap-2">
-              Feature Engineering
-              <span className="px-2 py-0.5 rounded text-[10px] bg-[#0d59f2]/10 border border-[#0d59f2]/20 uppercase">v2.9.0</span>
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-4 mr-4 border-r border-[#222f49] pr-4">
-            <button className="text-xs font-semibold text-[#90a4cb] hover:text-[#0d59f2] uppercase tracking-wider transition-colors">Templates</button>
-            <button className="text-xs font-semibold text-[#90a4cb] hover:text-[#0d59f2] uppercase tracking-wider transition-colors">History</button>
-          </div>
-          <button className="bg-[#0d59f2] text-white px-4 h-9 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-[#0d59f2]/90 transition-all shadow-lg shadow-[#0d59f2]/20">
-            <span className="material-symbols-outlined text-lg">verified</span>
-            Validate Pipeline
-          </button>
-          <button className="bg-[#222f49] text-white px-4 h-9 rounded-lg text-sm font-bold hover:bg-[#2d3b5a] transition-all flex items-center gap-2">
-            <span className="material-symbols-outlined text-lg">play_arrow</span>
-            Dry Run
-          </button>
-        </div>
-      </header>
-
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar Nav */}
+        {/* Sidebar Nav (Pipeline Layers) */}
         <aside className="w-64 border-r border-[#222f49] bg-[#101622] flex flex-col shrink-0">
           <div className="p-6">
             <p className="text-xs font-bold uppercase tracking-widest text-[#90a4cb] mb-4">Pipeline Layers</p>
@@ -99,7 +606,7 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                   onClick={() => layer.id && onNavigate(layer.id as any)}
                   className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer border ${
                     layer.active 
-                    ? 'bg-[#0d59f2]/10 text-[#0d59f2] border-[#0d59f2]/20' 
+                    ? 'bg-[#0d59f2]/10 text-[#0d59f2] border-[#0d59f2]/20 shadow-sm' 
                     : 'text-[#90a4cb] border-transparent hover:bg-[#222f49] hover:text-white'
                   }`}
                 >
@@ -109,179 +616,311 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
               ))}
             </nav>
           </div>
-          <div className="mt-auto p-6 border-t border-[#222f49]">
-            <div className="p-4 rounded-xl bg-[#1a2333] border border-[#222f49]">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-[#90a4cb]">System Health</span>
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              </div>
-              <div className="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-[#0d59f2] h-full w-[74%] rounded-full"></div>
-              </div>
-              <p className="text-[10px] text-[#90a4cb]/50 mt-2 italic">Node cluster: us-east-4</p>
-            </div>
-          </div>
         </aside>
 
-        {/* Workflow Canvas */}
-        <main className="flex-1 bg-[#0b0f1a] relative overflow-hidden workflow-grid p-8">
-          <div className="absolute bottom-6 left-6 flex gap-2 z-10">
-            <div className="flex bg-[#222f49] rounded-lg shadow-xl border border-slate-700 p-1">
-              <button className="p-2 hover:bg-slate-800 rounded text-slate-400"><span className="material-symbols-outlined">add</span></button>
-              <button className="px-3 text-xs font-bold text-slate-400 flex items-center border-x border-slate-700 mx-1">100%</button>
-              <button className="p-2 hover:bg-slate-800 rounded text-slate-400"><span className="material-symbols-outlined">remove</span></button>
-            </div>
-          </div>
-
-          <div className="relative w-full h-full flex items-center justify-center gap-16">
-            <svg className="absolute inset-0 w-full h-full pointer-events-none">
-              <path d="M 320 300 L 480 300" fill="none" stroke="#0d59f2" strokeDasharray="4 4" strokeWidth="2" className="drop-shadow-[0_0_4px_#0d59f2]" />
-              <path d="M 680 300 L 840 300" fill="none" stroke="#222f49" strokeWidth="2" />
-            </svg>
-            
-            {/* Node: Source */}
-            <div className="w-60 bg-[#1a2333] border border-slate-700 rounded-xl p-4 shadow-xl relative group">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="material-symbols-outlined text-slate-400">database</span>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Source</span>
-              </div>
-              <p className="font-bold text-sm mb-1 text-white">Soybean_Main_DB</p>
-              <p className="text-[10px] text-[#90a4cb]">Historical Futures</p>
-              <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-[#1a2333] border-2 border-slate-700 flex items-center justify-center">
-                <div className="w-2 h-2 rounded-full bg-slate-600"></div>
-              </div>
-            </div>
-
-            {/* Node: Transformation */}
-            <div className="w-64 bg-[#1a2333] border-2 border-[#0d59f2] rounded-xl p-5 shadow-[0_0_20px_rgba(13,89,242,0.15)] relative scale-110 z-10">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[#0d59f2]">function</span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#0d59f2]">Transformation</span>
+        {/* Main Content (Workbench) */}
+        <main className="flex-1 bg-[#0b0f1a] relative overflow-hidden flex flex-col">
+            {/* Top Control Bar (Inside Main) */}
+            <div className="h-14 border-b border-[#222f49] bg-[#161d2b] px-6 flex items-center justify-end z-40 shrink-0 gap-3">
+                <div className="mr-auto flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[#0d59f2]">science</span>
+                    <span className="font-bold text-white text-sm uppercase tracking-wider">Agri-Alpha Mining Workbench</span>
                 </div>
-                <span className="material-symbols-outlined text-green-500 text-sm">verified</span>
-              </div>
-              <p className="font-bold text-base mb-1 text-white">Log Returns & Volatility</p>
-              <div className="flex flex-wrap gap-1 mt-3">
-                <span className="text-[9px] bg-[#0d59f2]/10 px-2 py-0.5 rounded text-[#0d59f2] border border-[#0d59f2]/20">Rolling (20d)</span>
-                <span className="text-[9px] bg-[#222f49] px-2 py-0.5 rounded text-[#90a4cb]">L2 Norm</span>
-              </div>
-              <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-[#1a2333] border-2 border-[#0d59f2] flex items-center justify-center">
-                <div className="w-2 h-2 rounded-full bg-[#0d59f2] shadow-[0_0_8px_#0d59f2]"></div>
-              </div>
-              <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-[#1a2333] border-2 border-slate-700 flex items-center justify-center">
-                <div className="w-2 h-2 rounded-full bg-slate-600"></div>
-              </div>
+
+                <div className="flex items-center gap-2 bg-[#0a0c10] px-3 py-1.5 rounded-lg border border-[#222f49]">
+                    <span className="text-[10px] text-[#90a4cb] font-bold uppercase tracking-wider">Active Dataset:</span>
+                    <span className="text-xs font-mono font-bold text-emerald-400">{activeDataset ? activeDataset.asset : 'No Data'}</span>
+                    <span className="text-[10px] text-slate-500">({chartData.length} bars)</span>
+                </div>
+                <button 
+                    onClick={handlePushToFusion}
+                    disabled={activeFactors.length === 0}
+                    className={`px-4 h-9 rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-lg uppercase tracking-wider ${activeFactors.length === 0 ? 'bg-[#222f49] text-[#90a4cb] cursor-not-allowed' : 'bg-[#0d59f2] text-white hover:bg-[#1a66ff]'}`}
+                >
+                    Push to Fusion
+                    <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                </button>
             </div>
 
-            {/* Node: Next Stage */}
-            <div className="w-60 bg-[#1a2333] border-2 border-dashed border-slate-700 rounded-xl p-4 shadow-lg opacity-60">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="material-symbols-outlined text-slate-400">add</span>
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Next Stage</span>
-              </div>
-              <p className="font-bold text-sm mb-1 text-slate-400 italic">Add Fusion Layer...</p>
-              <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-[#101622] border-2 border-slate-700 flex items-center justify-center">
-                <div className="w-2 h-2 rounded-full bg-slate-700"></div>
-              </div>
+            {/* 3-Column Workbench */}
+            <div className="flex-1 flex overflow-hidden">
+                
+                {/* COL 1: FACTOR LIBRARY */}
+                <div className="w-72 border-r border-[#222f49] flex flex-col bg-[#0a0c10] shrink-0">
+                    <div className="p-4 border-b border-[#222f49] bg-[#101622]">
+                        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white flex items-center gap-2">
+                            <span className="material-symbols-outlined text-sm text-[#0d59f2]">library_books</span>
+                            Factor Templates
+                        </h3>
+                    </div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-4">
+                        {['MARKET', 'GEO', 'FUNDAMENTAL'].map(cat => (
+                            <div key={cat}>
+                                <p className="text-[9px] font-bold text-[#90a4cb] uppercase tracking-widest mb-2 px-1">{cat} Factors</p>
+                                <div className="space-y-2">
+                                    {FACTOR_TEMPLATES.filter(f => f.category === cat).map(f => (
+                                        <div key={f.id} onClick={() => handleAddFactor(f)} className="p-3 rounded-lg border border-[#222f49] bg-[#182234] hover:border-[#0d59f2] cursor-pointer transition-all group">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <span className="text-xs font-bold text-white group-hover:text-[#0d59f2]">{f.name}</span>
+                                                <span className="text-[10px] text-[#0d59f2] opacity-0 group-hover:opacity-100">+ADD</span>
+                                            </div>
+                                            <p className="text-[9px] text-[#90a4cb] leading-tight">{f.desc}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* COL 2: GENERATION & VISUALIZATION (Center) */}
+                <div className="flex-1 flex flex-col min-w-0 bg-[#0b0f1a] relative border-r border-[#222f49]">
+                    {!activeDataset && (
+                        <div className="absolute inset-0 z-50 bg-[#0b0f1a]/80 backdrop-blur-sm flex flex-col items-center justify-center">
+                            <span className="material-symbols-outlined text-4xl text-[#fa6238] mb-4">dataset</span>
+                            <h3 className="text-white font-bold uppercase tracking-wider">No Input Pipeline</h3>
+                            <p className="text-[#90a4cb] text-xs mt-2 mb-6">Please process raw futures data in the 'Algorithm' tab first.</p>
+                            <button onClick={() => onNavigate('algorithm')} className="px-6 py-2 bg-[#0d59f2] text-white rounded font-bold uppercase text-xs">Go to Pre-processing</button>
+                        </div>
+                    )}
+
+                    {/* AI Input */}
+                    <div className="p-4 border-b border-[#222f49] bg-[#101622]/50">
+                        <div className="bg-[#182234] border border-[#222f49] rounded-xl p-3 shadow-xl flex gap-3">
+                            <div className="flex-1">
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[9px] font-black text-[#0d59f2] uppercase tracking-widest flex items-center gap-1">
+                                        <span className="material-symbols-outlined text-sm">psychology</span> GenAI Factor Synthesizer
+                                    </span>
+                                </div>
+                                <input 
+                                    type="text" 
+                                    value={aiPrompt}
+                                    onChange={(e) => setAiPrompt(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAiGenerate()}
+                                    placeholder='e.g., "Rolling 10-day Z-Score of Volume weighted by Open Interest"'
+                                    className="w-full bg-[#0a0c10] border border-[#314368] rounded-lg px-3 py-2 text-xs text-white focus:border-[#0d59f2] outline-none"
+                                />
+                            </div>
+                            <button 
+                                onClick={handleAiGenerate}
+                                disabled={isThinking || !aiPrompt}
+                                className={`px-4 rounded-lg font-bold uppercase text-xs flex flex-col items-center justify-center gap-1 transition-all w-20 ${isThinking ? 'bg-[#222f49] text-[#90a4cb]' : 'bg-[#0d59f2] text-white hover:bg-[#1a66ff]'}`}
+                            >
+                                <span className={`material-symbols-outlined text-lg ${isThinking ? 'animate-spin' : ''}`}>auto_awesome</span>
+                                {isThinking ? '...' : 'GEN'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Visualization Area */}
+                    <div className="flex-1 p-4 overflow-y-auto custom-scrollbar flex flex-col gap-4">
+                        {selectedFactorId && activeFactorDef ? (
+                            <div className="flex flex-col h-full gap-4">
+                                {/* Header Info */}
+                                <div className="flex justify-between items-center">
+                                    <div>
+                                        <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                                            {activeFactorDef.name}
+                                            <span className={`text-[9px] px-2 py-0.5 rounded border uppercase font-bold ${getCategoryColor(activeFactorDef.category)}`}>{activeFactorDef.category}</span>
+                                        </h2>
+                                        <p className="text-[10px] text-[#90a4cb] font-mono mt-1 bg-[#1a2333] px-2 py-1 rounded inline-block border border-[#314368]">
+                                            {activeFactorDef.code_snippet}
+                                        </p>
+                                    </div>
+                                    
+                                    {/* Factor Switcher - FIXED SCROLLING */}
+                                    <div className="flex gap-1 overflow-x-auto max-w-[400px] no-scrollbar pb-1">
+                                        {activeFactors.map(f => (
+                                            <button 
+                                                key={f.id}
+                                                onClick={() => { 
+                                                    setSelectedFactorId(f.id); 
+                                                    // Pass simpler ID for templates to trigger logic mapping
+                                                    const tmplId = f.source === 'TEMPLATE' ? f.id.split('_')[0] + '_' + f.id.split('_')[1] : undefined;
+                                                    calculateFactor(f.id, tmplId); 
+                                                }} 
+                                                className={`h-8 px-3 rounded border flex items-center justify-center text-[10px] font-bold transition-all whitespace-nowrap shrink-0 ${selectedFactorId === f.id ? 'bg-[#0d59f2] border-[#0d59f2] text-white' : 'bg-[#182234] border-[#314368] text-[#90a4cb]'}`}
+                                            >
+                                                {f.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Main Chart */}
+                                <div className="flex-1 bg-[#182234] border border-[#314368] rounded-xl p-4 min-h-[300px] relative">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                            <defs>
+                                                <linearGradient id="colorFactor" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#0d59f2" stopOpacity={0.3}/>
+                                                    <stop offset="95%" stopColor="#0d59f2" stopOpacity={0}/>
+                                                </linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#222f49" vertical={false} />
+                                            <XAxis dataKey="date" tick={{fill: '#90a4cb', fontSize: 10}} axisLine={{stroke: '#314368'}} tickLine={false} minTickGap={40} />
+                                            <YAxis yAxisId="left" hide domain={['auto', 'auto']} />
+                                            <YAxis yAxisId="right" orientation="right" tick={{fill: '#0d59f2', fontSize: 10}} axisLine={false} tickLine={false} width={30} />
+                                            <Tooltip 
+                                                contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368', borderRadius: '8px' }}
+                                                itemStyle={{ fontSize: '11px', fontFamily: 'monospace' }}
+                                                labelStyle={{ color: '#90a4cb', marginBottom: '4px' }}
+                                            />
+                                            <Legend verticalAlign="top" height={36}/>
+                                            <Area yAxisId="left" type="monotone" dataKey="adjusted" stroke="#555" fill="#555" fillOpacity={0.1} strokeWidth={1} name="Asset Price" />
+                                            <Line yAxisId="right" type="monotone" dataKey="factor" stroke="#0d59f2" strokeWidth={2} dot={false} name="Factor Score" />
+                                            {/* Zero Line */}
+                                            <ReferenceLine yAxisId="right" y={0} stroke="#314368" strokeDasharray="3 3" />
+                                        </ComposedChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center opacity-40">
+                                <span className="material-symbols-outlined text-6xl text-[#90a4cb]">functions</span>
+                                <p className="text-sm font-bold text-[#90a4cb] uppercase tracking-widest mt-4">Select or Generate a Factor</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* COL 3: QC METRICS (Right) */}
+                <div className="w-72 bg-[#0a0c10] flex flex-col shrink-0">
+                    <div className="p-4 border-b border-[#222f49] bg-[#101622]">
+                        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white flex items-center gap-2">
+                            <span className="material-symbols-outlined text-sm text-[#0bda5e]">verified</span>
+                            Alpha Quality Control
+                        </h3>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+                        {/* 1. Statistics */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-[#182234] border border-[#222f49] p-3 rounded-xl text-center group relative">
+                                <span 
+                                    className="text-[9px] text-[#90a4cb] font-bold uppercase block mb-1 flex items-center justify-center gap-1 cursor-help"
+                                    onMouseEnter={(e) => handleTooltip(e, 'Correlation between current factor value and future return. >0.05 is good.')}
+                                    onMouseLeave={() => setGlobalTooltip(null)}
+                                >
+                                    IC (Info Coeff)
+                                    <span className="material-symbols-outlined text-[10px]">info</span>
+                                </span>
+                                <span className={`text-xl font-black ${Math.abs(metrics.ic) > 0.05 ? 'text-[#0bda5e]' : 'text-slate-400'}`}>
+                                    {metrics.ic.toFixed(3)}
+                                </span>
+                            </div>
+                            <div className="bg-[#182234] border border-[#222f49] p-3 rounded-xl text-center group relative">
+                                <span 
+                                    className="text-[9px] text-[#90a4cb] font-bold uppercase block mb-1 flex items-center justify-center gap-1 cursor-help"
+                                    onMouseEnter={(e) => handleTooltip(e, 'Information Ratio. Measures risk-adjusted return. Stability of the Alpha. >1.0 is excellent.')}
+                                    onMouseLeave={() => setGlobalTooltip(null)}
+                                >
+                                    IR (Annual)
+                                    <span className="material-symbols-outlined text-[10px]">info</span>
+                                </span>
+                                <span className="text-xl font-black text-white">{metrics.ir.toFixed(2)}</span>
+                            </div>
+                        </div>
+
+                        {/* 2. Quantile Returns */}
+                        <div className="bg-[#182234] border border-[#222f49] rounded-xl p-4">
+                            <h4 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest mb-3">Grouped Returns (Monotonicity)</h4>
+                            <div className="h-32 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={quantileData}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#222f49" vertical={false} />
+                                        <XAxis dataKey="group" tick={{fill: '#90a4cb', fontSize: 9}} axisLine={false} tickLine={false} />
+                                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0a0e17', border: '1px solid #314368', fontSize: '10px' }} />
+                                        <Bar dataKey="ret" radius={[2, 2, 0, 0]}>
+                                            {quantileData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={entry.ret > 0 ? '#0bda5e' : '#fa6238'} />
+                                            ))}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+
+                        {/* 3. Turnover/Autocorr */}
+                        <div className="bg-[#182234] border border-[#222f49] rounded-xl p-4 space-y-3 group relative">
+                            <div>
+                                <div className="flex justify-between text-[10px] uppercase font-bold text-[#90a4cb] mb-1 cursor-help">
+                                    <span 
+                                        className="flex items-center gap-1"
+                                        onMouseEnter={(e) => handleTooltip(e, 'Persistence of the signal. High (>0.9) means low turnover (good for costs). Low means high churn.')}
+                                        onMouseLeave={() => setGlobalTooltip(null)}
+                                    >
+                                        Autocorrelation (1D)
+                                        <span className="material-symbols-outlined text-[10px]">info</span>
+                                    </span>
+                                    <span className="text-white">{metrics.autocorr.toFixed(2)}</span>
+                                </div>
+                                <div className="w-full h-1 bg-[#101622] rounded-full overflow-hidden">
+                                    <div className="h-full bg-[#ffb347]" style={{ width: `${Math.abs(metrics.autocorr) * 100}%` }}></div>
+                                </div>
+                            </div>
+                            <p className="text-[9px] text-slate-500 italic">
+                                {metrics.autocorr > 0.9 ? 'High persistence (Low turnover)' : metrics.autocorr < 0.5 ? 'High churn (High transaction costs)' : 'Balanced signal'}
+                            </p>
+                        </div>
+
+                        {/* 4. AI Factor Audit (New Section) */}
+                        <div className="border-t border-[#314368] pt-4 mt-2">
+                            <h3 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest mb-3 flex items-center gap-2">
+                                <span className="material-symbols-outlined text-sm text-[#0d59f2]">smart_toy</span>
+                                AI Factor Audit
+                            </h3>
+                            {aiAudit ? (
+                                <div className={`p-3 rounded-lg border text-left animate-in fade-in ${aiAudit.verdict === 'PASS' ? 'bg-[#0bda5e]/10 border-[#0bda5e]/30' : aiAudit.verdict === 'FAIL' ? 'bg-[#fa6238]/10 border-[#fa6238]/30' : 'bg-[#182234] border-[#314368]'}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${aiAudit.verdict === 'PASS' ? 'bg-[#0bda5e] text-black' : aiAudit.verdict === 'FAIL' ? 'bg-[#fa6238] text-white' : 'bg-slate-600 text-white'}`}>
+                                            {aiAudit.verdict}
+                                        </span>
+                                        <span className="text-[9px] font-bold text-white">Score: {aiAudit.score}/100</span>
+                                    </div>
+                                    <p className="text-[10px] leading-relaxed text-slate-200">
+                                        {aiAudit.analysis}
+                                    </p>
+                                    <button onClick={handleRunAudit} disabled={isAuditing} className="mt-2 w-full text-[9px] uppercase font-bold text-[#90a4cb] hover:text-white flex items-center justify-center gap-1 py-1 bg-black/20 rounded">
+                                        <span className={`material-symbols-outlined text-[10px] ${isAuditing ? 'animate-spin' : ''}`}>refresh</span> Re-Audit
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="text-center p-4 bg-[#182234] rounded-xl border border-[#314368] border-dashed">
+                                    <span className="material-symbols-outlined text-[#90a4cb] text-2xl mb-2">fact_check</span>
+                                    <p className="text-[10px] text-[#90a4cb] mb-3">Evaluate factor logic vs performance.</p>
+                                    <button 
+                                        onClick={handleRunAudit}
+                                        disabled={isAuditing || !selectedFactorId}
+                                        className="px-3 py-1.5 bg-[#0d59f2] text-white rounded text-[10px] font-bold uppercase hover:bg-[#1a66ff] disabled:opacity-50"
+                                    >
+                                        {isAuditing ? 'Auditing...' : 'Run Audit'}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
             </div>
-          </div>
         </main>
-
-        {/* Right Panel: Config */}
-        <aside className="w-[450px] border-l border-[#222f49] bg-[#101622] flex flex-col z-20 shrink-0">
-          <div className="border-b border-[#222f49] flex shrink-0">
-            {['Methods', 'Params', 'Outputs'].map((tab, i) => (
-              <button key={tab} className={`flex-1 py-4 text-xs font-bold uppercase tracking-wider border-b-[3px] transition-all ${i === 0 ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}>
-                {tab}
-              </button>
-            ))}
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 custom-scrollbar">
-            <section>
-              <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#0d59f2] text-lg">category</span>
-                Standard Algorithms
-              </h3>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { name: 'PCA', desc: 'Dimensionality reduction' },
-                  { name: 'Indicators', desc: 'RSI, MACD, Bollinger Bands', active: true },
-                  { name: 'Wavelet Transform', desc: 'Time-frequency analysis' },
-                  { name: 'Fourier Series', desc: 'Periodic signal detection' }
-                ].map(method => (
-                  <div key={method.name} className={`p-4 rounded-xl border transition-all cursor-pointer relative ${method.active ? 'border-2 border-[#0d59f2] bg-[#0d59f2]/5' : 'border-[#222f49] hover:border-[#0d59f2] bg-white/5'}`}>
-                    {method.active && <span className="material-symbols-outlined absolute top-2 right-2 text-[#0d59f2] text-sm">check_circle</span>}
-                    <p className="text-sm font-bold mb-1">{method.name}</p>
-                    <p className="text-[10px] text-[#90a4cb]">{method.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#0d59f2] text-lg">tune</span>
-                Configuration Parameters
-              </h3>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <label className="text-xs font-medium text-[#90a4cb]">Window Size (Days)</label>
-                    <span className="text-xs font-bold text-[#0d59f2]">20</span>
-                  </div>
-                  <input type="range" className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[#0d59f2]" min="1" max="252" defaultValue="20" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-[#90a4cb]">Normalization Method</label>
-                  <select className="w-full bg-[#1a2333] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:ring-1 focus:ring-[#0d59f2] outline-none">
-                    <option>Z-Score Standardization</option>
-                    <option selected>Min-Max Scaling (0, 1)</option>
-                    <option>L2 Normalization</option>
-                    <option>Robust Scaler</option>
-                  </select>
-                </div>
-              </div>
-            </section>
-
-            <section className="flex-1 flex flex-col min-h-[200px]">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[#0d59f2] text-lg">code</span>
-                  Logic Preview: Rolling Vol
-                </h3>
-              </div>
-              <div className="flex-1 bg-[#0d1117] rounded-lg overflow-hidden border border-slate-800 text-[11px] p-4 font-mono text-slate-300 shadow-inner overflow-x-auto">
-<pre><code><span className="text-pink-500">import</span> pandas <span className="text-pink-500">as</span> pd
-<span className="text-blue-400">def</span> <span className="text-yellow-400">calc_volatility</span>(df, window=20):
-    <span className="text-slate-500"># Log returns calculation</span>
-    returns = np.log(df / df.shift(1))
-    <span className="text-slate-500"># Rolling standard deviation</span>
-    vol = returns.rolling(window).std()
-    <span className="text-pink-500">return</span> vol * np.sqrt(252)</code></pre>
-              </div>
-            </section>
-
-            <div className="mt-auto pt-4 flex flex-col gap-3">
-              <button className="w-full h-12 rounded-xl bg-[#0d59f2] text-white font-bold tracking-wide shadow-lg shadow-[#0d59f2]/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2">
-                <span className="material-symbols-outlined text-sm">add_task</span>
-                Validate & Include Layer
-              </button>
-              <p className="text-[10px] text-center text-[#90a4cb] uppercase tracking-tighter">Feature compatibility verified: 124 signals ready</p>
-            </div>
-          </div>
-        </aside>
       </div>
 
+      {globalTooltip && (
+        <div 
+            className="fixed z-[9999] bg-[#0a0e17] border border-[#314368] p-3 rounded-lg text-[10px] text-slate-200 pointer-events-none max-w-[200px] shadow-2xl animate-in fade-in zoom-in-95 duration-100"
+            style={{ left: globalTooltip.x, top: globalTooltip.y, transform: 'translateX(-50%)' }}
+        >
+            {globalTooltip.text}
+        </div>
+      )}
+
       <style>{`
-        .workflow-grid {
-          background-image: radial-gradient(circle, #222f49 1px, transparent 1px);
-          background-size: 30px 30px;
-        }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #101622; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #314368; border-radius: 10px; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
     </div>
   );

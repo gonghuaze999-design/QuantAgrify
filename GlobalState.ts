@@ -145,6 +145,15 @@ export interface KnowledgeDataPackage {
     };
 }
 
+export interface FusionDataPackage {
+    data: any[]; // Wide format: Date, Open, High, Low, Close, Factor1, Factor2...
+    features: string[]; // List of factor names
+    metadata: {
+        asset: string;
+        generatedAt: number;
+    };
+}
+
 export interface DataLayerPoint {
     date: string; // ISO YYYY-MM-DD
     value: number; // The primary signal value
@@ -152,7 +161,7 @@ export interface DataLayerPoint {
 }
 
 export interface DataLayer {
-    sourceId: 'weather' | 'satellite' | 'supply' | 'spot' | 'knowledge';
+    sourceId: 'weather' | 'satellite' | 'supply' | 'spot' | 'knowledge' | 'engineered_features';
     name: string; // Display name
     metricName: string; // e.g., "Soil Moisture Index" (Primary metric for simple charts)
     
@@ -165,6 +174,7 @@ export interface DataLayer {
     macroPackage?: MacroDataPackage;
     spotPackage?: SpotDataPackage;
     knowledgePackage?: KnowledgeDataPackage;
+    fusionPackage?: FusionDataPackage; // Feature Engineering Output
     
     timestamp: number;
 }
@@ -198,7 +208,18 @@ export const PROCESSED_DATASET = {
     timestamp: 0
 };
 
-// 6. Global Alarm State (New)
+// 6. Feature Engineering View Cache (Persistence)
+export const FEATURE_VIEW_CACHE = {
+    timestamp: 0,
+    activeFactors: [] as any[],
+    selectedFactorId: null as string | null,
+    chartData: [] as any[],
+    metrics: { ic: 0, ir: 0, autocorr: 0, turnover: 0 },
+    quantileData: [] as any[],
+    aiAudit: null as any
+};
+
+// 7. Global Alarm State
 export interface Alarm {
     id: string;
     time: string; // HH:mm format
