@@ -1,34 +1,22 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11-slim
-
+FROM python:3.9-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
-
 # Set work directory
 WORKDIR /app
-
-# Install system dependencies
-# Added libgomp1 for potential ML libraries and curl for health checks
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libgomp1 \
-    curl \
-    && apt-get clean \
+# Install system dependencies required for jqdatasdk (pandas/numpy compilation)
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
+# Install python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 # Copy project
 COPY . .
-
-# Expose the port the app runs on
+# Expose port
 EXPOSE 8000
-
-# Command to run the application
-# Using 0.0.0.0 to ensure it binds to all interfaces for Railway
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run application
+CMD ["python", "main.py"]
