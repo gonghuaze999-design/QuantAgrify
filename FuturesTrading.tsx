@@ -17,7 +17,7 @@ import {
   PolarRadiusAxis,
   Radar
 } from 'recharts';
-import { EXCHANGE_MAPPING, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS } from './GlobalState';
+import { EXCHANGE_MAPPING, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS, GLOBAL_MARKET_CONTEXT, DATA_LAYERS } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface FuturesTradingProps {
@@ -72,7 +72,9 @@ const FUTURES_CACHE = {
     lastFetchKey: '',
     // Sentiment Caching
     lastSentimentUpdate: 0,
-    lastSentimentKey: ''
+    lastSentimentKey: '',
+    // Sync Signature
+    lastSyncedSignature: ''
 };
 
 // 1. Precise Context Mapping for AI
@@ -133,12 +135,12 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
   const navItems = [
     { label: 'Data Source', icon: 'database', view: 'dataSource' as const, active: true },
-    { label: 'Algorithm', icon: 'precision_manufacturing', view: 'algorithm' as const },
-    { label: 'Cockpit', icon: 'monitoring', view: 'cockpit' as const },
-    { label: 'API Console', icon: 'terminal', view: 'api' as const }
+    { label: 'Algorithm', icon: 'precision_manufacturing', view: 'algorithm' as const, active: false },
+    { label: 'Cockpit', icon: 'monitoring', view: 'cockpit' as const, active: false },
+    { label: 'API Console', icon: 'terminal', view: 'api' as const, active: false }
   ];
 
-  // --- Logic: Sync State to Cache on Change ---
+  // --- Logic 1: Sync State to Cache on Change ---
   useEffect(() => {
       FUTURES_CACHE.activeExchange = activeExchange;
       FUTURES_CACHE.activeVariety = activeVariety;
@@ -153,25 +155,88 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       if (marketData.length > 0) FUTURES_CACHE.hasData = true;
   }, [activeExchange, activeVariety, activeSymbol, startDate, endDate, isManualMode, manualSymbolInput, marketData, aiSentiment, dataSourceName]);
 
+  // --- Logic 2: Global Context Synchronization (Strategy 2) ---
+  useEffect(() => {
+      if (GLOBAL_MARKET_CONTEXT.isContextSet) {
+          const sig = `${GLOBAL_MARKET_CONTEXT.asset.code}|${GLOBAL_MARKET_CONTEXT.startDate}|${GLOBAL_MARKET_CONTEXT.endDate}`;
+          if (sig !== FUTURES_CACHE.lastSyncedSignature) {
+              // Parse Global Asset Code (e.g., C9999.XDCE)
+              const code = GLOBAL_MARKET_CONTEXT.asset.code; 
+              const parts = code.split('.');
+              
+              // Only sync if format matches supported futures logic
+              if (parts.length === 2) {
+                  const suffix = '.' + parts[1];
+                  const variety = parts[0].replace(/[0-9]+|1!/g, ''); // Extract 'C' from 'C9999' or 'ZC' from 'ZC1!'
+
+                  // Check if the extracted exchange suffix exists in our mapping
+                  if (EXCHANGE_MAPPING[suffix]) {
+                      console.log(`[FuturesTrading] Global Sync: ${code} -> ${variety} on ${suffix}`);
+                      setActiveExchange(suffix);
+                      setActiveVariety(variety);
+                      setIsManualMode(false); // Prefer auto-variety mode when possible
+                  } else {
+                      // Fallback for foreign/unknown exchanges -> Manual Mode
+                      console.log(`[FuturesTrading] Global Sync (Manual Fallback): ${code}`);
+                      setIsManualMode(true);
+                      setManualSymbolInput(code);
+                  }
+                  
+                  // Sync Dates
+                  setStartDate(GLOBAL_MARKET_CONTEXT.startDate);
+                  setEndDate(GLOBAL_MARKET_CONTEXT.endDate);
+                  
+                  // Update signature to prevent loop
+                  FUTURES_CACHE.lastSyncedSignature = sig;
+              }
+          }
+      }
+  }, []);
+
   // Check pushed state
   useEffect(() => {
       const id = `${activeVariety}${activeExchange}`;
       setIsPushed(PUSHED_ASSETS.has(id));
   }, [activeVariety, activeExchange]);
 
-  // --- Logic: Push to Model ---
+  // --- Logic 3: Push to Model (Enhanced) ---
   const handlePushToModel = () => {
       const id = `${activeVariety}${activeExchange}`;
-      PUSHED_ASSETS.add(id);
       
-      // Save Full Context to maintain data consistency in Algorithm view
+      // 1. Maintain Legacy Context for Algorithm Workflow (fetches fresh data based on params)
+      PUSHED_ASSETS.add(id);
       PUSHED_ASSET_CONTEXTS.set(id, {
-          symbol: activeSymbol, // Use the specific symbol (e.g. C9999.XDCE) used in fetching
+          symbol: activeSymbol, 
           variety: activeVariety,
           exchange: activeExchange,
-          startDate: startDate, // Pass specific date range
+          startDate: startDate, 
           endDate: endDate,
           dataSourceName: dataSourceName
+      });
+
+      // 2. NEW: Push High-Res Data Package to Data Bus (For Fusion/Cockpit immediate usage)
+      DATA_LAYERS.set('futures_market', {
+          sourceId: 'futures_market',
+          name: `Futures Market: ${activeVariety}`,
+          metricName: 'Price & Sentiment',
+          // Lightweight Series for global preview
+          data: marketData.map(d => ({
+              date: d.date,
+              value: d.close,
+              meta: { vol: d.volume, open: d.open, high: d.high, low: d.low }
+          })),
+          // Full Payload
+          futuresPackage: {
+              marketData: marketData,
+              sentiment: aiSentiment,
+              metadata: {
+                  symbol: activeSymbol,
+                  variety: activeVariety,
+                  exchange: activeExchange,
+                  interval: `${startDate} to ${endDate}`
+              }
+          },
+          timestamp: Date.now()
       });
 
       setIsPushed(true);
@@ -232,7 +297,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       `;
 
       try {
-          // Fix: Use gemini-3-flash-preview for text tasks
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const response = await ai.models.generateContent({
               model: "gemini-3-flash-preview",
@@ -473,7 +537,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
           {navItems.map((item) => (
             <button 
               key={item.label}
-              // Fix: Changed 'futuresTrading' to 'dataSource' to match navItems's available view types
+              // Fixed: Changed 'futuresTrading' to 'dataSource' to match navItems's available view types
               // and properly identify the parent active section.
               onClick={() => item.view !== 'dataSource' && onNavigate(item.view)}
               className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
@@ -797,7 +861,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                     <ResponsiveContainer width="100%" height="100%">
                         <RadarChart cx="50%" cy="50%" outerRadius="70%" data={aiSentiment.radarData}>
                             <PolarGrid stroke="#314368" />
-                            <PolarAngleAxis dataKey="subject" tick={{ fill: '#90a4cb', fontSize: 9, fontWait: 'bold' }} />
+                            <PolarAngleAxis dataKey="subject" tick={{ fill: '#90a4cb', fontSize: 9, fontWeight: 'bold' }} />
                             <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
                             <Radar name="Sentiment" dataKey="A" stroke={aiSentiment.bias === 'BULLISH' ? '#0bda5e' : aiSentiment.bias === 'BEARISH' ? '#fa6238' : '#0d59f2'} strokeWidth={2} fill={aiSentiment.bias === 'BULLISH' ? '#0bda5e' : aiSentiment.bias === 'BEARISH' ? '#fa6238' : '#0d59f2'} fillOpacity={0.3} />
                             <Tooltip contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368', fontSize: '10px' }} />

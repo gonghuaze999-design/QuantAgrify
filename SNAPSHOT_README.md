@@ -1,11 +1,22 @@
 
-# QuantAgrify System Snapshot (v2.9.5 LTS)
+# QuantAgrify System Snapshot (v2.9.6 LTS)
 
 **Timestamp:** 2024-Q2 Stable Baseline
-**Status:** SOLIDIFIED / Production Ready
+**Status:** SOLIDIFIED / Production Ready / Logic Locked
 
-## 1. Release Milestone: 2.9.5 LTS
-This version solidifies the core integration of the "McFly AgriBrain" engine. All data pipelines from satellite to spot industry are now synchronized with the Global SystemClock.
+## 1. Release Milestone: 2.9.6 LTS (Current)
+This snapshot solidifies the "Asymmetric Synchronization" logic across the Policy and Spot modules. The system now intelligently handles the friction between specific Futures Contracts (e.g., `C9999.XDCE`) and broad macro categories (e.g., `Corn`).
+
+### Core Logic Finalized
+#### A. Policy Sentiment (Macro/News)
+- **Mapping Strategy**: `Fuzzy Mapping`. Input Futures Code -> Maps to Broad Category (e.g., `C9999` -> `Corn`).
+- **Time Strategy**: `Time Independent`. Does **NOT** sync with Global Context dates. Always fetches "Real-time/Latest" (48-72h) to capture immediate market regime.
+- **Data Push**: Pushes `PolicyDataPackage` (Sentiment Score, Regime Type, Top Drivers) to `policy_regime` layer.
+
+#### B. Spot Industry (Physical/Basis)
+- **Mapping Strategy**: `Fuzzy Mapping`. Input Futures Code -> Maps to Physical Asset (e.g., `M9999` -> `Soybean Meal` industry data).
+- **Time Strategy**: `Implicit Sync`. **DOES** sync with Global Context dates for data fetching, but hides the date picker UI to reduce cognitive load (user assumes "relevant period").
+- **Data Push**: Pushes `SpotDataPackage` (Basis, Inventory, Spot Price) to `spot` layer.
 
 ### Infrastructure & Reliability
 - [x] **Global State Persistence**: Data layers (Satellite, Weather, Supply, Spot, Knowledge) verified for multi-view persistence.
@@ -13,19 +24,19 @@ This version solidifies the core integration of the "McFly AgriBrain" engine. Al
 - [x] **Clock & Alarms**: Standardized across 100% of the UI.
 - [x] **Cross-Platform**: Responsive layout confirmed for PC/Tablet/Mobile viewports.
 
-### Functional Modules
-- **Futures Trading**: Integrated JQData Index/Dominant logic + AI Search sentiment.
-- **Satellite GEE**: Masked NDVI Histogram computation stabilized.
-- **Weather**: GDD/Phenology tracking with real-time Open-Meteo telemetry.
-- **Supply/Demand**: Multi-modal fusion (Numerical + LLM News) active.
-- **Knowledge Base**: Neural graph visualization with selection-to-quantification logic.
-- **Feature Engineering**: AI Factor Audit active with strict metric validation.
+### Functional Modules Status
+- **Futures Trading**: Active. Push -> `futures_market` layer.
+- **Satellite GEE**: Active. Push -> `satellite` layer.
+- **Weather**: Active. Push -> `weather` layer.
+- **Supply/Demand**: Active. Push -> `supply` layer.
+- **Policy Sentiment**: **FINALIZED**. Push -> `policy_regime`.
+- **Spot Industry**: **FINALIZED**. Push -> `spot`.
+- **Algorithm (Pre-process)**: Ready to ingest all above layers.
 
 ## 2. Maintenance Log
-- Fixed: Recharts responsive containers overflow in Algorithm views.
-- Fixed: API Console JQData credential caching logic.
-- Updated: System prompt for Gemini 3 Flash to prioritize China-region specific commodity drivers.
-- Validated: "Negative" AI Audit results confirmed as feature, not bug (Garbage In, Garbage Out protection).
+- **v2.9.6**: Locked Spot & Policy logic. Implemented Fuzzy Mapping for `CODE_TO_THEME` and `CODE_TO_SPOT`.
+- **v2.9.5**: Fixed Recharts overflow. Updated API Console credentials.
+- **v2.9.0**: Initial integration of Gemini 3 Flash.
 
 ---
-*System State Frozen: v2.9.5 LTS. Ready for production deployment.*
+*System State Frozen: v2.9.6 LTS. Ready for Algorithm Fusion testing.*

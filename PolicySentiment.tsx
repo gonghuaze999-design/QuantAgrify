@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Tooltip } from 'recharts';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface PolicySentimentProps {
@@ -63,7 +65,23 @@ const MORE_COMMODITIES = [
     { id: 'rice', label: 'Rice (大米)', keywords: 'Rough Rice futures, Thailand rice export prices, India rice export ban, global rice inventory' },
     { id: 'hogs', label: 'Lean Hogs (生猪)', keywords: 'Lean Hogs futures CME, China pork prices, Dalian live hog futures, swine fever outbreak' },
     { id: 'cattle', label: 'Live Cattle (活牛)', keywords: 'Live Cattle futures, US beef demand, Brazil beef exports, cattle on feed report' },
+    { id: 'rubber', label: 'Rubber (橡胶)', keywords: 'Natural Rubber futures SHFE, Thailand rubber export, tire manufacturing demand China' },
 ];
+
+// --- FUZZY MAPPING: Futures Code Prefix -> Theme ID ---
+const CODE_TO_THEME_ID: Record<string, string> = {
+    'C': 'corn', 'CS': 'corn',
+    'A': 'soy', 'B': 'soy', 'M': 'soy', 'Y': 'soy', 'ZS': 'soy', 'ZM': 'soy', 'ZL': 'soy',
+    'WH': 'wheat', 'PM': 'wheat', 'ZW': 'wheat',
+    'SR': 'sugar', 'SB': 'sugar',
+    'CF': 'cotton',
+    'P': 'palm',
+    'OI': 'rapeseed', 'RM': 'rapeseed', 'RS': 'rapeseed',
+    'LH': 'hogs', 'JD': 'hogs', 
+    'RU': 'rubber',
+    'AP': 'macro', // Apples -> Macro (Fallback)
+    'PK': 'macro', // Peanuts -> Macro (Fallback)
+};
 
 export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) => {
   // Initialize based on cached ID, fallback to Corn if not found
@@ -80,6 +98,18 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('--:--');
   const [isCachedData, setIsCachedData] = useState(false);
+  const [isPushed, setIsPushed] = useState(false);
+  
+  // Toast State
+  const [toast, setToast] = useState<{show: boolean, msg: string} | null>(null);
+
+  // --- Toast Timeout ---
+  useEffect(() => {
+      if (toast?.show) {
+          const timer = setTimeout(() => setToast(null), 4000);
+          return () => clearTimeout(timer);
+      }
+  }, [toast]);
 
   const navItems = [
     { label: 'Data Source', icon: 'database', view: 'dataSource' as const, active: true },
@@ -98,9 +128,43 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
     { name: 'Custom Upload', icon: 'upload', id: 'customUpload' }
   ];
 
+  // --- 0. Global Context Sync (Smart Mapping) ---
+  useEffect(() => {
+      // Logic: If Global Context is set, try to switch the active theme.
+      // Do NOT sync dates (Policy is always "Latest/Real-time").
+      if (GLOBAL_MARKET_CONTEXT.isContextSet) {
+          const code = GLOBAL_MARKET_CONTEXT.asset.code; 
+          // Match prefix (e.g. "C" from "C9999.XDCE" or "ZS" from "ZS1!")
+          const match = code.match(/^([A-Z]+)/);
+          
+          if (match) {
+              const prefix = match[1];
+              const mappedId = CODE_TO_THEME_ID[prefix];
+              
+              if (mappedId) {
+                  // Find the theme object
+                  const allThemes = [...COMMODITY_THEMES, ...MORE_COMMODITIES];
+                  const targetTheme = allThemes.find(t => t.id === mappedId);
+                  
+                  if (targetTheme && targetTheme.id !== activeTheme.id) {
+                      console.log(`[Policy] Global Sync: ${code} -> ${targetTheme.label}`);
+                      setActiveTheme(targetTheme);
+                      // Reset push state because the asset changed
+                      setIsPushed(false);
+                  }
+              } else {
+                  // Optional: Show toast if mapping fails but context is set
+                  // setToast({ show: true, msg: `Global asset '${code}' maps to general Macro policy.` });
+              }
+          }
+      }
+  }, []);
+
   // Update the global cache ID whenever activeTheme changes
   useEffect(() => {
       LAST_ACTIVE_THEME_ID = activeTheme.id;
+      // If we switched themes, we likely haven't pushed this specific signal yet
+      setIsPushed(false);
   }, [activeTheme]);
 
   // --- Real Data Fetching Logic ---
@@ -108,6 +172,7 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
     setLoading(true);
     setError(null);
     setIsCachedData(false);
+    setIsPushed(false);
 
     // 1. Check Cache first
     const themeId = activeTheme.id;
@@ -246,6 +311,47 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
     fetchIntelligence(false);
   }, [activeTheme]);
 
+  // --- Push Logic ---
+  const handlePushSignal = () => {
+      if (feed.length === 0) return;
+
+      // 1. Aggregate Score
+      let totalWeightedScore = 0;
+      let totalWeight = 0;
+
+      feed.forEach(item => {
+          // Weight by price shock and attention
+          const weight = (item.impactMetrics?.priceShock || 50) * (item.impactMetrics?.attention || 50);
+          totalWeightedScore += item.sentiment * weight;
+          totalWeight += weight;
+      });
+
+      const finalScore = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+      
+      // 2. Determine Regime
+      let regime = 'Neutral';
+      if (finalScore > 0.4) regime = 'Risk On / Bullish';
+      else if (finalScore < -0.4) regime = 'Risk Off / Bearish';
+      else if (Math.abs(finalScore) < 0.2 && feed.length > 5) regime = 'Stagnation';
+
+      // 3. Push to Data Layer
+      DATA_LAYERS.set('policy_regime', {
+          sourceId: 'policy_regime',
+          name: `Macro Regime: ${activeTheme.label}`,
+          metricName: 'Sentiment Aggregator',
+          data: [], // No time series needed for this snapshot, Fusion uses package
+          policyPackage: {
+              sentimentScore: finalScore,
+              regimeType: regime,
+              topDrivers: feed.slice(0, 3).map(i => i.title),
+              timestamp: Date.now()
+          },
+          timestamp: Date.now()
+      });
+
+      setIsPushed(true);
+  };
+
   // --- Visual Helpers ---
   const getBiasColor = (bias: string) => {
       switch(bias) {
@@ -266,7 +372,24 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
   const isMainTheme = COMMODITY_THEMES.some(t => t.id === activeTheme.id);
 
   return (
-    <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
+    <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30 relative">
+      
+      {/* Toast Notification */}
+      {toast && (
+          <div className="fixed bottom-24 right-6 z-[100] animate-in fade-in slide-in-from-right-4">
+              <div className="bg-[#182234] border border-[#fa6238] text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
+                  <span className="material-symbols-outlined text-[#fa6238]">info</span>
+                  <div>
+                      <h4 className="text-xs font-bold text-[#fa6238] uppercase">Sync Limit</h4>
+                      <p className="text-[10px] text-slate-300 leading-tight">{toast.msg}</p>
+                  </div>
+                  <button onClick={() => setToast(null)} className="ml-auto text-slate-500 hover:text-white">
+                      <span className="material-symbols-outlined text-sm">close</span>
+                  </button>
+              </div>
+          </div>
+      )}
+
       {/* Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
         <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
@@ -327,7 +450,7 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
               <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#0d59f2] to-blue-600 flex items-center justify-center font-bold text-white shadow-lg">AI</div>
               <div className="overflow-hidden">
                 <p className="text-sm font-bold truncate text-white">Sentiment AI</p>
-                <p className="text-[10px] text-[#90a4cb] uppercase font-semibold">Gemini 2.5: Active</p>
+                <p className="text-[10px] text-[#90a4cb] uppercase font-semibold">Gemini 3.0: Active</p>
               </div>
             </div>
           </div>
@@ -566,11 +689,22 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
                             </div>
                         </div>
                         
-                        {/* Action Button - Placeholder for Future Development */}
+                        {/* Action Button - Push Regime Signal */}
                         <div className="p-6 mt-auto border-t border-[#314368]">
-                            <button className="w-full py-4 bg-[#0d59f2] hover:bg-[#1a66ff] text-white font-black uppercase text-xs rounded-xl shadow-lg shadow-[#0d59f2]/20 transition-all flex items-center justify-center gap-2 group opacity-50 cursor-not-allowed" title="Feature coming in v2.0">
-                                <span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform">bolt</span>
-                                Generate Quant Signal (Coming Soon)
+                            <button 
+                                onClick={handlePushSignal}
+                                disabled={isPushed || feed.length === 0}
+                                className={`w-full py-4 rounded-xl font-black uppercase text-xs shadow-lg transition-all flex items-center justify-center gap-2 group ${
+                                    isPushed 
+                                    ? 'bg-[#0bda5e] text-[#0a0c10] cursor-not-allowed shadow-[#0bda5e]/20' 
+                                    : 'bg-[#0d59f2] hover:bg-[#1a66ff] text-white shadow-[#0d59f2]/20'
+                                }`}
+                            >
+                                {isPushed ? (
+                                    <><span className="material-symbols-outlined text-lg">check_circle</span> REGIME SIGNAL PUSHED</>
+                                ) : (
+                                    <><span className="material-symbols-outlined text-lg group-hover:scale-110 transition-transform">cloud_upload</span> PUSH REGIME SIGNAL</>
+                                )}
                             </button>
                         </div>
                     </div>

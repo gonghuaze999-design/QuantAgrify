@@ -17,6 +17,15 @@ export interface AssetContext {
 
 export const PUSHED_ASSET_CONTEXTS = new Map<string, AssetContext>();
 
+// === NEW: GLOBAL MARKET CONTEXT (Set in WelcomeHub) ===
+// This allows the user to define their intent before entering specific modules.
+export const GLOBAL_MARKET_CONTEXT = {
+    asset: { code: 'C9999.XDCE', name: 'Corn (玉米)' }, // Default Focus
+    startDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
+    isContextSet: false // Flag to check if user actively set this
+};
+
 // 2. Shared Exchange Configuration
 export const EXCHANGE_MAPPING: Record<string, { name: string, varieties: { code: string, name: string }[] }> = {
     '.XDCE': {
@@ -121,19 +130,28 @@ export interface SatelliteDataPackage {
     };
 }
 
+// Enhanced Macro Package for Supply/Demand
 export interface MacroDataPackage {
-    timeSeries: any[]; // Price vs AI Score
+    timeSeries: any[]; // Date, aiScore, Price
     metadata: {
         assetName: string;
         drivers: any[];
+        interval: { start: string, end: string };
+    };
+    metrics: {
+        supplyScore: number;
+        demandScore: number;
+        balanceTrend: string;
+        confidence: number;
     };
 }
 
 export interface SpotDataPackage {
-    basisSeries: any[]; // Futures, Spot, Basis
+    basisSeries: any[]; // Futures, Spot, Basis, Inventory
     metadata: {
         assetName: string;
         spotSource: string;
+        interval: { start: string, end: string };
     };
 }
 
@@ -154,14 +172,45 @@ export interface FusionDataPackage {
     };
 }
 
+// NEW: Futures Data Package (Added for FuturesTrading export)
+export interface FuturesDataPackage {
+    marketData: any[]; // OHLCV Series
+    sentiment: any; // AI Sentiment Object
+    metadata: {
+        symbol: string;
+        variety: string;
+        exchange: string;
+        interval: string;
+    };
+}
+
+// NEW: Policy Regime Package
+export interface PolicyDataPackage {
+    sentimentScore: number; // -1 (Bearish) to 1 (Bullish)
+    regimeType: string; // e.g. "Risk On", "Stagflation", "Supply Shock"
+    topDrivers: string[];
+    timestamp: number;
+}
+
+// NEW: Composite Signal Package (Output of Fusion)
+export interface CompositeSignalPackage {
+    asset: string;
+    signals: { date: string; score: number; price: number; regimeAdjustment: number }[];
+    weights: Record<string, number>;
+    metrics: {
+        sharpe: number;
+        turnover: number;
+    };
+}
+
 export interface DataLayerPoint {
-    date: string; // ISO YYYY-MM-DD
-    value: number; // The primary signal value
-    meta?: any;   // Extra context (e.g., distinct GDD vs Precip)
+    date: string;
+    value: number;
+    meta?: any;
 }
 
 export interface DataLayer {
-    sourceId: 'weather' | 'satellite' | 'supply' | 'spot' | 'knowledge' | 'engineered_features';
+    sourceId: 'weather' | 'satellite' | 'supply' | 'spot' | 'knowledge' | 'engineered_features' | 'policy_regime' | 'composite_signal' | 'futures_market';
     name: string; // Display name
     metricName: string; // e.g., "Soil Moisture Index" (Primary metric for simple charts)
     
@@ -175,6 +224,9 @@ export interface DataLayer {
     spotPackage?: SpotDataPackage;
     knowledgePackage?: KnowledgeDataPackage;
     fusionPackage?: FusionDataPackage; // Feature Engineering Output
+    policyPackage?: PolicyDataPackage; // Policy Output
+    compositePackage?: CompositeSignalPackage; // Fusion Output
+    futuresPackage?: FuturesDataPackage; // Futures Trading Output
     
     timestamp: number;
 }

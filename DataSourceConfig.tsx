@@ -14,16 +14,15 @@ import {
   ComposedChart,
   Area
 } from 'recharts';
-import { DATA_LAYERS } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface DataSourceConfigProps {
-// ... existing interface ...
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'cockpit' | 'api') => void;
 }
 
-// ... existing constants and logic ...
-// (Retaining all existing imports, constants, and SATELLITE_CACHE)
+// --- CONSTANTS ---
+
 const SATELLITE_TARGETS: Record<string, any> = {
     // DCE
     'Corn (DCE)': { 
@@ -135,6 +134,28 @@ const SATELLITE_TARGETS: Record<string, any> = {
     }
 };
 
+// Map Futures Code Prefix (e.g., 'C' from 'C9999') to Satellite Target Key
+const GLOBAL_CONTEXT_MAP: Record<string, string> = {
+    'C': 'Corn (DCE)',
+    'CS': 'Corn (DCE)', // Starch -> Corn region
+    'A': 'Soybean No.1 (DCE)',
+    'B': 'Soybean No.1 (DCE)',
+    'M': 'Soybean Meal (DCE)',
+    'Y': 'Soybean Meal (DCE)', // Oil -> Meal region
+    'P': 'Palm Oil (DCE)',
+    'CF': 'Cotton (ZCE)',
+    'SR': 'Sugar (ZCE)',
+    'OI': 'Rapeseed Oil (ZCE)',
+    'RM': 'Rapeseed Oil (ZCE)',
+    'AP': 'Apple (ZCE)',
+    'RU': 'Rubber (SHFE)',
+    'ZC': 'Corn (CBOT)',
+    'ZS': 'Soybeans (CBOT)',
+    'ZM': 'Soybeans (CBOT)', 
+    'ZL': 'Soybeans (CBOT)',
+    'SB': 'Sugar No.11 (ICE)'
+};
+
 const PHENOLOGY_STAGES = [
     { id: 'sowing', label: 'Sowing / Emergence', offsetStart: 0, offsetEnd: 1 }, 
     { id: 'vegetative', label: 'Vegetative Growth', offsetStart: 1, offsetEnd: 2.5 },
@@ -175,6 +196,7 @@ interface AiInsight {
 const SATELLITE_CACHE = {
     // Inputs
     activeAsset: 'Corn (DCE)',
+    lastSyncedSignature: '', // Combination of Code + Start + End to detect changes
     targetYear: currentYear,
     compareYear: currentYear - 1,
     selectedStage: 'reproductive',
@@ -195,7 +217,7 @@ const SATELLITE_CACHE = {
 };
 
 export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }) => {
-// ... (Logic code omitted for brevity, keeping all existing logic same) ...
+  // State
   const [activeAsset, setActiveAsset] = useState<string>(SATELLITE_CACHE.activeAsset);
   const [targetYear, setTargetYear] = useState<number>(SATELLITE_CACHE.targetYear);
   const [compareYear, setCompareYear] = useState<number>(SATELLITE_CACHE.compareYear);
@@ -225,7 +247,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
   const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(SATELLITE_CACHE.results.currentImageUrl);
   const [compareImageUrl, setCompareImageUrl] = useState<string | null>(SATELLITE_CACHE.results.compareImageUrl);
   const [ndviData, setNdviData] = useState<any[]>(SATELLITE_CACHE.results.ndviData);
-  const [yieldAlpha, setYieldAlpha] = useState(SATELLITE_CACHE.results.yieldAlpha);
+  const [yieldAlpha, setYieldAlpha] = useState<typeof SATELLITE_CACHE['results']['yieldAlpha']>(SATELLITE_CACHE.results.yieldAlpha);
   
   // AI Insight State
   const [aiInsight, setAiInsight] = useState<AiInsight | null>(SATELLITE_CACHE.results.aiInsight);
@@ -233,6 +255,9 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
 
   // Push State
   const [isPushed, setIsPushed] = useState(false);
+
+  // Toast State (Strategy 2)
+  const [toast, setToast] = useState<{show: boolean, msg: string} | null>(null);
 
   const categories = [
     { name: 'Satellite Remote Sensing', icon: 'satellite_alt', id: 'dataSource', active: true },
@@ -251,7 +276,57 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
     { label: 'API Console', icon: 'terminal', view: 'api' as const }
   ];
 
-  // ... (Effect hooks and helper functions retained exactly as before) ...
+  // --- Toast Timeout Logic ---
+  useEffect(() => {
+      if (toast?.show) {
+          const timer = setTimeout(() => setToast(null), 4000);
+          return () => clearTimeout(timer);
+      }
+  }, [toast]);
+
+  // --- 1. Smart Initialization Logic (Auto-Sync) with Strategy 2 Feedback ---
+  useEffect(() => {
+      if (GLOBAL_MARKET_CONTEXT.isContextSet && GLOBAL_MARKET_CONTEXT.asset.code) {
+          // Construct a signature of the Global Context state
+          const currentSig = `${GLOBAL_MARKET_CONTEXT.asset.code}|${GLOBAL_MARKET_CONTEXT.startDate}|${GLOBAL_MARKET_CONTEXT.endDate}`;
+          
+          if (currentSig !== SATELLITE_CACHE.lastSyncedSignature) {
+              // Context has changed (or first run), attempt sync
+              const code = GLOBAL_MARKET_CONTEXT.asset.code; // e.g. "C9999.XDCE"
+              const match = code.match(/^([A-Z]+)/);
+              if (match) {
+                  const varietyPrefix = match[1];
+                  const mappedTarget = GLOBAL_CONTEXT_MAP[varietyPrefix];
+                  if (mappedTarget && SATELLITE_TARGETS[mappedTarget]) {
+                      console.log(`[Satellite] Global Context Changed. Syncing: ${code} -> ${mappedTarget}`);
+                      setActiveAsset(mappedTarget);
+                      SATELLITE_CACHE.activeAsset = mappedTarget;
+                  } else {
+                      // Strategy 2: Toast Feedback for Mismatch
+                      setToast({
+                          show: true,
+                          msg: `Satellite imagery not available for '${GLOBAL_MARKET_CONTEXT.asset.name}' (Non-Crop Asset). View unchanged.`
+                      });
+                  }
+              }
+              // Update signature so we don't sync again until context changes
+              SATELLITE_CACHE.lastSyncedSignature = currentSig;
+          } else {
+              // Context hasn't changed, respect local cache (User may have changed asset manually)
+              setActiveAsset(SATELLITE_CACHE.activeAsset);
+          }
+      } else {
+          // No global context, just use cached asset
+          setActiveAsset(SATELLITE_CACHE.activeAsset);
+      }
+  }, []);
+
+  // Update Cache when user manually changes asset
+  useEffect(() => {
+      SATELLITE_CACHE.activeAsset = activeAsset;
+  }, [activeAsset]);
+
+  // 1. Initial Connection Setup (Keep LocalStorage sync)
   useEffect(() => {
       if (!SATELLITE_CACHE.hasData) {
           const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
@@ -265,6 +340,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
       }
   }, []);
 
+  // 2. Cache Persistence
   useEffect(() => {
       SATELLITE_CACHE.activeAsset = activeAsset;
       SATELLITE_CACHE.targetYear = targetYear;
@@ -287,10 +363,14 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
       return () => clearInterval(interval);
   }, [isProcessing]);
 
+  // 3. Stage Logic
   const availableStages = useMemo(() => {
+      // In a real app, you might disable future stages based on `targetYear` vs `currentDate`.
+      // For this demo/simulation, we leave them enabled.
       return PHENOLOGY_STAGES.map(stage => ({ ...stage, disabled: false }));
   }, [activeAsset, targetYear]);
 
+  // Reset stage if invalid when asset changes
   useEffect(() => {
       const currentStageObj = availableStages.find(s => s.id === selectedStage);
       if (currentStageObj?.disabled) {
@@ -299,6 +379,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
       }
   }, [availableStages, selectedStage]);
 
+  // Reset push state when key inputs change
   useEffect(() => { setIsPushed(false); }, [activeAsset, targetYear]);
 
   const generateAgronomicInsight = async (alpha: number, trendData: any[]) => {
@@ -319,7 +400,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
 
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-          const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
+          const response = await ai.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
           const text = response.text;
           if (text) {
               const cleaned = text.replace(/```json|```/g, '').trim();
@@ -345,19 +426,24 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
 
       try {
           const target = SATELLITE_TARGETS[activeAsset];
+          // Simple date construction for payload
           const [startM, startD] = target.cropCal.start.split('-').map(Number);
           const [endM, endD] = target.cropCal.end.split('-').map(Number);
           let seasonEndYear = targetYear;
           if (endM < startM) seasonEndYear++; 
+          
           const fullSeasonStart = `${targetYear}-${String(startM).padStart(2,'0')}-${String(startD).padStart(2,'0')}`;
           const fullSeasonEnd = `${seasonEndYear}-${String(endM).padStart(2,'0')}-${String(endD).padStart(2,'0')}`;
+          
           const stageConfig = PHENOLOGY_STAGES.find(s => s.id === selectedStage);
           if (!stageConfig) throw new Error("Invalid Stage");
+          
           const seasonStartDt = new Date(targetYear, startM - 1, startD);
           const stageStartDt = new Date(seasonStartDt);
           stageStartDt.setDate(seasonStartDt.getDate() + (stageConfig.offsetStart * 30));
           const stageEndDt = new Date(seasonStartDt);
           stageEndDt.setDate(seasonStartDt.getDate() + (stageConfig.offsetEnd * 30));
+          
           const mapStageStart = stageStartDt.toISOString().split('T')[0];
           const mapStageEnd = stageEndDt.toISOString().split('T')[0];
 
@@ -503,6 +589,22 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
 
   return (
     <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
+      {/* Toast Notification */}
+      {toast && (
+          <div className="fixed bottom-24 right-6 z-[100] animate-in fade-in slide-in-from-right-4">
+              <div className="bg-[#182234] border border-[#fa6238] text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
+                  <span className="material-symbols-outlined text-[#fa6238]">info</span>
+                  <div>
+                      <h4 className="text-xs font-bold text-[#fa6238] uppercase">Sync Limit</h4>
+                      <p className="text-[10px] text-slate-300 leading-tight">{toast.msg}</p>
+                  </div>
+                  <button onClick={() => setToast(null)} className="ml-auto text-slate-500 hover:text-white">
+                      <span className="material-symbols-outlined text-sm">close</span>
+                  </button>
+              </div>
+          </div>
+      )}
+
       {/* Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
         <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
@@ -538,8 +640,8 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
         </div>
       </nav>
 
-      {/* ... Rest of the component code (Sidebar, Main Content) remains identical ... */}
       <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar Nav */}
         <aside className="w-72 bg-[#101622] border-r border-[#314368] flex flex-col shrink-0">
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scrollbar">
             <p className="px-3 text-[10px] font-bold text-[#90a4cb]/50 uppercase tracking-widest mb-4">Data Categories</p>
@@ -569,8 +671,9 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
           </div>
         </aside>
 
+        {/* Main Content Area */}
         <main className="flex-1 flex flex-col h-full bg-[#101622] relative overflow-hidden">
-          {/* ... Control Header, Charts, Footer ... (No changes needed inside main content) */}
+          {/* Controls Header */}
           <header className="z-10 bg-[#101622]/80 backdrop-blur-md border-b border-[#314368] flex flex-col justify-between px-6 py-4 gap-4">
             <div className="flex items-center justify-between">
                 <div>
@@ -648,7 +751,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
                 </div>
             </div>
           </header>
-          {/* Main Visual Content */}
+
           <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar pb-32">
             <div className="grid grid-cols-12 gap-6 h-[500px]">
                 {/* Left: Map */}

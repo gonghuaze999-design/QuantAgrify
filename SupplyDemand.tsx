@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import {
@@ -16,7 +17,7 @@ import {
   AreaChart,
   Brush 
 } from 'recharts';
-import { DATA_LAYERS } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface SupplyDemandProps {
@@ -103,6 +104,21 @@ const EXTRA_COMMODITIES = [
     { label: 'Live Hog (生猪)', value: 'Pork' },
 ];
 
+// --- FUZZY MAPPING: Global Futures Code -> Macro Category ---
+const GLOBAL_TO_MACRO_MAP: Record<string, string> = {
+    'C': 'Corn', 'CS': 'Corn', // Corn Complex
+    'A': 'Soybeans', 'B': 'Soybeans', 'M': 'Soybeans', 'Y': 'Soybeans', // Soy Complex
+    'WH': 'Wheat', 'PM': 'Wheat', // Wheat
+    'CF': 'Cotton',
+    'SR': 'Sugar',
+    'RU': 'Rubber',
+    'P': 'Palm Oil',
+    'OI': 'Rapeseed Meal', 'RM': 'Rapeseed Meal', 'RS': 'Rapeseed Meal', // Rapeseed Complex
+    'JD': 'Eggs',
+    'AP': 'Apples',
+    'LH': 'Pork'
+};
+
 // --- MODULE LEVEL CACHE ---
 const PAGE_CACHE = {
     data: {
@@ -135,7 +151,8 @@ const PAGE_CACHE = {
         activeConnections: [] as SimpleConnection[],
         // Caching Timestamps
         lastAiUpdate: 0,
-        lastAiCommodity: ''
+        lastAiCommodity: '',
+        lastSyncedSignature: '' // For Global Sync Check
     }
 };
 
@@ -166,6 +183,9 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
   // Push State
   const [isPushed, setIsPushed] = useState(false);
 
+  // Toast
+  const [toast, setToast] = useState<{show: boolean, msg: string} | null>(null);
+
   const categories = [
     { name: 'Satellite Remote Sensing', icon: 'satellite_alt', id: 'dataSource' },
     { name: 'Weather', icon: 'cloud', id: 'weatherAnalysis' },
@@ -182,6 +202,52 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
     { label: 'Cockpit', icon: 'monitoring', view: 'cockpit' as const },
     { label: 'API Console', icon: 'terminal', view: 'api' as const }
   ];
+
+  // --- Toast Timeout Logic ---
+  useEffect(() => {
+      if (toast?.show) {
+          const timer = setTimeout(() => setToast(null), 4000);
+          return () => clearTimeout(timer);
+      }
+  }, [toast]);
+
+  // --- 0. Global Context Sync Logic (Fuzzy Matching) ---
+  useEffect(() => {
+      if (GLOBAL_MARKET_CONTEXT.isContextSet) {
+          const currentSig = `${GLOBAL_MARKET_CONTEXT.asset.code}|${GLOBAL_MARKET_CONTEXT.startDate}|${GLOBAL_MARKET_CONTEXT.endDate}`;
+          
+          if (currentSig !== PAGE_CACHE.data.lastSyncedSignature) {
+              const code = GLOBAL_MARKET_CONTEXT.asset.code; // e.g. "M9999.XDCE"
+              const match = code.match(/^([A-Z]+)/);
+              if (match) {
+                  const varietyPrefix = match[1];
+                  const mappedMacro = GLOBAL_TO_MACRO_MAP[varietyPrefix];
+                  
+                  if (mappedMacro) {
+                      console.log(`[SupplyDemand] Global Sync: ${code} -> ${mappedMacro}`);
+                      setActiveCommodity(mappedMacro);
+                      setDateRange({
+                          start: GLOBAL_MARKET_CONTEXT.startDate,
+                          end: GLOBAL_MARKET_CONTEXT.endDate
+                      });
+                      
+                      // Invalidate data triggers
+                      setTeData(null);
+                      setMarketStats(null);
+                      setUsdaData([]);
+                      setChartData([]);
+                      setAiAnalysis(prev => ({...prev, loading: true}));
+                  } else {
+                      setToast({
+                          show: true,
+                          msg: `Global Asset '${GLOBAL_MARKET_CONTEXT.asset.name}' has no direct macro supply model. Keeping current view.`
+                      });
+                  }
+              }
+              PAGE_CACHE.data.lastSyncedSignature = currentSig;
+          }
+      }
+  }, []);
 
   // --- Sync State to Cache ---
   useEffect(() => {
@@ -590,7 +656,14 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
               timeSeries: chartData,
               metadata: {
                   assetName: activeCommodity,
-                  drivers: aiAnalysis.marketDrivers
+                  drivers: aiAnalysis.marketDrivers,
+                  interval: { start: dateRange.start, end: dateRange.end }
+              },
+              metrics: {
+                  supplyScore: aiAnalysis.supplyScore,
+                  demandScore: aiAnalysis.demandScore,
+                  balanceTrend: aiAnalysis.balanceTrend,
+                  confidence: aiAnalysis.confidence
               }
           },
           timestamp: Date.now()
@@ -629,7 +702,24 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
         : aiAnalysis.estimatedProduction;
 
   return (
-    <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
+    <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30 relative">
+      
+      {/* Toast Notification */}
+      {toast && (
+          <div className="fixed bottom-24 right-6 z-[100] animate-in fade-in slide-in-from-right-4">
+              <div className="bg-[#182234] border border-[#fa6238] text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
+                  <span className="material-symbols-outlined text-[#fa6238]">info</span>
+                  <div>
+                      <h4 className="text-xs font-bold text-[#fa6238] uppercase">Sync Limit</h4>
+                      <p className="text-[10px] text-slate-300 leading-tight">{toast.msg}</p>
+                  </div>
+                  <button onClick={() => setToast(null)} className="ml-auto text-slate-500 hover:text-white">
+                      <span className="material-symbols-outlined text-sm">close</span>
+                  </button>
+              </div>
+          </div>
+      )}
+
       {/* Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
         <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   ComposedChart,
@@ -12,7 +13,7 @@ import {
   ResponsiveContainer,
   BarChart
 } from 'recharts';
-import { DATA_LAYERS } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface SpotIndustryProps {
@@ -61,7 +62,87 @@ const ASSET_CONFIG = {
         baseSpot: 2900,
         volatility: 0.015,
         jqIndustryTable: 'ZCE_WHEAT_IND'
+    },
+    // Expanded Commodities
+    Cotton: {
+        jqCode: 'CF9999.XZCE',
+        name: 'Cotton (棉花)',
+        marginName: 'Yarn Spinning Margin',
+        baseSpot: 16000,
+        volatility: 0.025,
+        jqIndustryTable: 'ZCE_COTTON_IND'
+    },
+    Sugar: {
+        jqCode: 'SR9999.XZCE',
+        name: 'Sugar (白糖)',
+        marginName: 'Refining Margin',
+        baseSpot: 6500,
+        volatility: 0.02,
+        jqIndustryTable: 'ZCE_SUGAR_IND'
+    },
+    Rubber: {
+        jqCode: 'RU9999.XSGE',
+        name: 'Rubber (橡胶)',
+        marginName: 'Tire Mfg Margin',
+        baseSpot: 14500,
+        volatility: 0.035,
+        jqIndustryTable: 'SHFE_RUBBER_IND'
+    },
+    PalmOil: {
+        jqCode: 'P9999.XDCE',
+        name: 'Palm Oil (棕榈油)',
+        marginName: 'Refining Margin',
+        baseSpot: 7800,
+        volatility: 0.04,
+        jqIndustryTable: 'DCE_PALM_IND'
+    },
+    RapeseedMeal: {
+        jqCode: 'RM9999.XZCE',
+        name: 'Rapeseed Meal (菜粕)',
+        marginName: 'Crush Margin',
+        baseSpot: 3200,
+        volatility: 0.025,
+        jqIndustryTable: 'ZCE_MEAL_IND'
+    },
+    Eggs: {
+        jqCode: 'JD9999.XDCE',
+        name: 'Eggs (鸡蛋)',
+        marginName: 'Breeding Margin',
+        baseSpot: 4200,
+        volatility: 0.05,
+        jqIndustryTable: 'DCE_EGG_IND'
+    },
+    Apples: {
+        jqCode: 'AP9999.XZCE',
+        name: 'Apples (苹果)',
+        marginName: 'Storage Margin',
+        baseSpot: 8500,
+        volatility: 0.04,
+        jqIndustryTable: 'ZCE_APPLE_IND'
+    },
+    Pork: {
+        jqCode: 'LH9999.XDCE',
+        name: 'Live Hog (生猪)',
+        marginName: 'Breeding Margin',
+        baseSpot: 15000,
+        volatility: 0.06,
+        jqIndustryTable: 'DCE_PORK_IND'
     }
+};
+
+// --- FUZZY MAPPING: Futures Code Prefix -> Spot Asset Key ---
+const CODE_TO_SPOT_MAP: Record<string, keyof typeof ASSET_CONFIG> = {
+    'C': 'Corn', 'CS': 'Corn',
+    'A': 'Soybean', 'B': 'Soybean', 'M': 'Soybean', 'Y': 'Soybean',
+    'WH': 'Wheat', 'PM': 'Wheat',
+    'CF': 'Cotton',
+    'SR': 'Sugar',
+    'RU': 'Rubber',
+    'P': 'PalmOil',
+    'RM': 'RapeseedMeal', 'OI': 'RapeseedMeal', 'RS': 'RapeseedMeal',
+    'JD': 'Eggs',
+    'AP': 'Apples',
+    'LH': 'Pork'
 };
 
 // --- Module Cache ---
@@ -70,7 +151,8 @@ const SPOT_CACHE = {
     data: [] as MarketPair[],
     lastFetched: 0,
     connStatus: { jq: 'offline', datayes: 'offline', jqLatency: null } as ConnectionStatus,
-    spotSource: 'JQData' as 'Datayes' | 'JQData' // Default preference to JQData
+    spotSource: 'JQData' as 'Datayes' | 'JQData', // Default preference to JQData
+    lastSyncedSignature: ''
 };
 
 export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
@@ -84,6 +166,13 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
 
   // Push State
   const [isPushed, setIsPushed] = useState(false);
+
+  // Toast
+  const [toast, setToast] = useState<{show: boolean, msg: string} | null>(null);
+
+  // Defines the main visible assets
+  const mainAssets: (keyof typeof ASSET_CONFIG)[] = ['Corn', 'Soybean', 'Wheat'];
+  const moreAssets = Object.keys(ASSET_CONFIG).filter(k => !mainAssets.includes(k as any)) as (keyof typeof ASSET_CONFIG)[];
 
   const categories = [
     { name: 'Satellite Remote Sensing', icon: 'satellite_alt', id: 'dataSource' },
@@ -101,6 +190,44 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
     { label: 'Cockpit', icon: 'monitoring', view: 'cockpit' as const },
     { label: 'API Console', icon: 'terminal', view: 'api' as const }
   ];
+
+  // --- Toast Timeout Logic ---
+  useEffect(() => {
+      if (toast?.show) {
+          const timer = setTimeout(() => setToast(null), 4000);
+          return () => clearTimeout(timer);
+      }
+  }, [toast]);
+
+  // --- 0. Global Context Sync Logic (Fuzzy Matching) ---
+  useEffect(() => {
+      if (GLOBAL_MARKET_CONTEXT.isContextSet) {
+          const currentSig = `${GLOBAL_MARKET_CONTEXT.asset.code}|${GLOBAL_MARKET_CONTEXT.startDate}|${GLOBAL_MARKET_CONTEXT.endDate}`;
+          
+          if (currentSig !== SPOT_CACHE.lastSyncedSignature) {
+              const code = GLOBAL_MARKET_CONTEXT.asset.code; 
+              const match = code.match(/^([A-Z]+)/);
+              if (match) {
+                  const varietyPrefix = match[1];
+                  const mappedSpot = CODE_TO_SPOT_MAP[varietyPrefix];
+                  
+                  if (mappedSpot) {
+                      console.log(`[Spot] Global Sync: ${code} -> ${mappedSpot}`);
+                      setActiveAsset(mappedSpot);
+                      // Invalidate previous data to force refetch with new dates/asset
+                      setChartData([]);
+                      setIsPushed(false);
+                  } else {
+                      setToast({
+                          show: true,
+                          msg: `Global Asset '${GLOBAL_MARKET_CONTEXT.asset.name}' has no direct spot model.`
+                      });
+                  }
+              }
+              SPOT_CACHE.lastSyncedSignature = currentSig;
+          }
+      }
+  }, []);
 
   // 1. Check Connections from LocalStorage (Simulating API Console Monitor)
   const checkConnections = useCallback(() => {
@@ -126,6 +253,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
   // --- Reset Push State when asset changes ---
   useEffect(() => {
       setIsPushed(false);
+      SPOT_CACHE.activeAsset = activeAsset;
   }, [activeAsset]);
 
   // 2. Fetch Data (Futures Real + Spot Sim/Real based on Source)
@@ -138,14 +266,15 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       let rawFutures: any[] = [];
       let usingRealFutures = false;
 
+      // Use Global Context Dates if set, else default to 60 days
+      const end = GLOBAL_MARKET_CONTEXT.isContextSet ? GLOBAL_MARKET_CONTEXT.endDate : new Date().toISOString().split('T')[0];
+      const start = GLOBAL_MARKET_CONTEXT.isContextSet ? GLOBAL_MARKET_CONTEXT.startDate : new Date(new Date().setDate(new Date().getDate() - 60)).toISOString().split('T')[0];
+
       // A. Try Fetch JQ Futures (Always needed for Basis)
       if (jqNode && jqNode.status === 'online') {
           try {
               const bridgeUrl = jqNode.url.trim().replace(/\/$/, '');
-              const end = new Date();
-              const start = new Date();
-              start.setDate(start.getDate() - 60);
-
+              
               const res = await fetch(`${bridgeUrl}/api/jqdata/price`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -154,8 +283,8 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                       password: jqNode.password,
                       symbol: ASSET_CONFIG[activeAsset].jqCode,
                       frequency: 'daily',
-                      start_date: start.toISOString().split('T')[0],
-                      end_date: end.toISOString().split('T')[0]
+                      start_date: start,
+                      end_date: end
                   })
               });
               
@@ -212,11 +341,15 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
           });
       } else {
           // Fallback: Pure Simulation if JQ Futures is also offline
-          const now = new Date();
+          // Generate data for the Global Context range or default 60 days
+          const sDate = new Date(start);
+          const eDate = new Date(end);
+          const days = Math.floor((eDate.getTime() - sDate.getTime()) / (1000 * 3600 * 24));
+          
           let price = config.baseSpot;
-          for (let i = 0; i < 30; i++) {
-              const d = new Date();
-              d.setDate(now.getDate() - (30 - i));
+          for (let i = 0; i <= days; i++) {
+              const d = new Date(sDate);
+              d.setDate(d.getDate() + i);
               price = price * (1 + (Math.random() - 0.5) * config.volatility);
               const fut = price * (1 - (Math.random() * 0.02));
               
@@ -243,9 +376,13 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       fetchData();
   }, [fetchData]);
 
-  // Push Logic
+  // Push Logic (Enhanced for Pre-processing)
   const handlePushSignal = () => {
       if (chartData.length === 0) return;
+
+      // Extract interval from data
+      const intervalStart = chartData[0].date;
+      const intervalEnd = chartData[chartData.length - 1].date;
 
       DATA_LAYERS.set('spot', {
           sourceId: 'spot',
@@ -257,12 +394,13 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
               value: d.basis,
               meta: { futures: d.futuresPrice, spot: d.spotPrice }
           })),
-          // High-Res Payload
+          // High-Res Payload with full inventory and basis series
           spotPackage: {
-              basisSeries: chartData,
+              basisSeries: chartData, // Contains futures, spot, basis, inventory
               metadata: {
                   assetName: activeAsset,
-                  spotSource: spotSource
+                  spotSource: spotSource,
+                  interval: { start: intervalStart, end: intervalEnd }
               }
           },
           timestamp: Date.now()
@@ -276,7 +414,24 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
   const basisTrend = latestData && chartData.length > 1 ? latestData.basis - chartData[chartData.length - 2].basis : 0;
 
   return (
-    <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
+    <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30 relative">
+      
+      {/* Toast Notification */}
+      {toast && (
+          <div className="fixed bottom-24 right-6 z-[100] animate-in fade-in slide-in-from-right-4">
+              <div className="bg-[#182234] border border-[#fa6238] text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
+                  <span className="material-symbols-outlined text-[#fa6238]">info</span>
+                  <div>
+                      <h4 className="text-xs font-bold text-[#fa6238] uppercase">Sync Limit</h4>
+                      <p className="text-[10px] text-slate-300 leading-tight">{toast.msg}</p>
+                  </div>
+                  <button onClick={() => setToast(null)} className="ml-auto text-slate-500 hover:text-white">
+                      <span className="material-symbols-outlined text-sm">close</span>
+                  </button>
+              </div>
+          </div>
+      )}
+
       {/* Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
         <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
@@ -348,9 +503,10 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
             <div className="flex flex-col">
               <h2 className="text-white text-xl font-bold">Spot & Industry Analytics</h2>
               <div className="flex gap-4 mt-2 items-center">
-                {/* Asset Selector */}
-                <div className="flex bg-[#182234] border border-[#314368] rounded-lg p-0.5">
-                    {(Object.keys(ASSET_CONFIG) as Array<keyof typeof ASSET_CONFIG>).map((asset) => (
+                {/* Asset Selector (UPDATED UI) */}
+                <div className="flex bg-[#182234] border border-[#314368] rounded-lg p-0.5 items-center">
+                    {/* Main Buttons */}
+                    {mainAssets.map((asset) => (
                         <button
                             key={asset}
                             onClick={() => setActiveAsset(asset)}
@@ -361,6 +517,26 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                             {asset}
                         </button>
                     ))}
+                    
+                    <div className="h-4 w-px bg-[#314368] mx-1"></div>
+
+                    {/* More Dropdown */}
+                    <div className="relative group px-2">
+                        <button className={`flex items-center gap-1 text-[10px] font-bold uppercase ${!mainAssets.includes(activeAsset) ? 'text-[#0d59f2]' : 'text-[#90a4cb]'}`}>
+                            {!mainAssets.includes(activeAsset) ? activeAsset : 'More'}
+                            <span className="material-symbols-outlined text-[14px]">expand_more</span>
+                        </button>
+                        <select
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            value={!mainAssets.includes(activeAsset) ? activeAsset : ''}
+                            onChange={(e) => setActiveAsset(e.target.value as any)}
+                        >
+                            <option value="" disabled>Select...</option>
+                            {moreAssets.map(asset => (
+                                <option key={asset} value={asset}>{ASSET_CONFIG[asset].name}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 
                 <div className="h-4 w-px bg-[#314368]"></div>
@@ -642,7 +818,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                 {isPushed ? (
                     <><span className="material-symbols-outlined text-lg">check_circle</span> LAYER ADDED</>
                 ) : (
-                    <><span className="material-symbols-outlined text-lg">cloud_upload</span> Push Spot Signal</>
+                    <><span className="material-symbols-outlined text-lg">cloud_upload</span> PUSH SPOT SIGNAL</>
                 )}
               </button>
             </div>

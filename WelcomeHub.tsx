@@ -1,9 +1,43 @@
-import React, { useState, useRef } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { SystemClock } from './SystemClock';
+import { GLOBAL_MARKET_CONTEXT } from './GlobalState';
 
 interface WelcomeHubProps {
   onNavigate: (view: 'dataSource' | 'algorithm' | 'cockpit' | 'api' | 'userMgmt' | 'login') => void;
 }
+
+// --- CONSTANTS: ASSET DEFINITIONS ---
+const AVAILABLE_ASSETS = [
+    { label: '--- Dalian (DCE) ---', options: [
+        { code: 'C9999.XDCE', name: 'Corn (玉米)' },
+        { code: 'A9999.XDCE', name: 'Soybean No.1 (黄大豆1号)' },
+        { code: 'M9999.XDCE', name: 'Soybean Meal (豆粕)' },
+        { code: 'Y9999.XDCE', name: 'Soybean Oil (豆油)' },
+        { code: 'P9999.XDCE', name: 'Palm Oil (棕榈油)' },
+        { code: 'JD9999.XDCE', name: 'Egg (鸡蛋)' },
+        { code: 'CS9999.XDCE', name: 'Corn Starch (玉米淀粉)' },
+    ]},
+    { label: '--- Zhengzhou (ZCE) ---', options: [
+        { code: 'CF9999.XZCE', name: 'Cotton (棉花)' },
+        { code: 'SR9999.XZCE', name: 'Sugar (白糖)' },
+        { code: 'OI9999.XZCE', name: 'Rapeseed Oil (菜油)' },
+        { code: 'RM9999.XZCE', name: 'Rapeseed Meal (菜粕)' },
+        { code: 'AP9999.XZCE', name: 'Apple (苹果)' },
+        { code: 'PK9999.XZCE', name: 'Peanut (花生)' },
+    ]},
+    { label: '--- Shanghai (SHFE) ---', options: [
+        { code: 'RU9999.XSGE', name: 'Rubber (橡胶)' },
+        { code: 'SP9999.XSGE', name: 'Paper Pulp (纸浆)' },
+    ]},
+    { label: '--- Chicago (CBOT) ---', options: [
+        { code: 'ZC1!.CBOT', name: 'Corn (美玉米)' },
+        { code: 'ZS1!.CBOT', name: 'Soybeans (美大豆)' },
+        { code: 'ZW1!.CBOT', name: 'Wheat (美小麦)' },
+        { code: 'ZL1!.CBOT', name: 'Soybean Oil (美豆油)' },
+        { code: 'ZM1!.CBOT', name: 'Soybean Meal (美豆粕)' },
+    ]}
+];
 
 export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
   const navItems = [
@@ -12,6 +46,32 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
     { id: 'cockpit', label: 'Cockpit', icon: 'monitoring', cardIcon: 'monitoring', desc: 'Real-time multi-asset oversight with proprietary signal alerts and precision backtesting.' },
     { id: 'api', label: 'API Console', icon: 'terminal', cardIcon: 'terminal', desc: 'Secure programmatic infrastructure for large-scale data harvesting and third-party delivery.' }
   ];
+
+  // Local state for the Global Context inputs
+  const [selectedAssetCode, setSelectedAssetCode] = useState(GLOBAL_MARKET_CONTEXT.asset.code);
+  const [startDate, setStartDate] = useState(GLOBAL_MARKET_CONTEXT.startDate);
+  const [endDate, setEndDate] = useState(GLOBAL_MARKET_CONTEXT.endDate);
+
+  // Update Global State on change
+  const handleContextUpdate = (key: 'code' | 'start' | 'end', value: string) => {
+      if (key === 'code') {
+          setSelectedAssetCode(value);
+          // Find Name
+          let name = 'Unknown';
+          for (const grp of AVAILABLE_ASSETS) {
+              const found = grp.options.find(o => o.code === value);
+              if (found) { name = found.name; break; }
+          }
+          GLOBAL_MARKET_CONTEXT.asset = { code: value, name };
+      } else if (key === 'start') {
+          setStartDate(value);
+          GLOBAL_MARKET_CONTEXT.startDate = value;
+      } else if (key === 'end') {
+          setEndDate(value);
+          GLOBAL_MARKET_CONTEXT.endDate = value;
+      }
+      GLOBAL_MARKET_CONTEXT.isContextSet = true;
+  };
 
   return (
     <div className="min-h-screen bg-[#05070a] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col relative selection:bg-[#0d59f2]/30">
@@ -61,7 +121,7 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col items-center justify-center p-8 relative overflow-hidden">
+      <main className="flex-1 flex flex-col items-center justify-center p-8 relative overflow-hidden pb-32">
         {/* Abstract Data Visualization Background */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-[#0d59f2]/5 rounded-full blur-[120px] pointer-events-none"></div>
 
@@ -123,27 +183,85 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
           ))}
         </div>
 
-        {/* Footer HUD Components */}
-        <div className="absolute bottom-0 left-0 right-0 p-8 flex justify-between items-end border-t border-white/5 bg-gradient-to-t from-black/40 to-transparent pointer-events-none">
-          <div className="flex gap-12">
-            <div className="flex flex-col gap-2">
-              <span className="text-[9px] font-black text-[#94a3b8] uppercase tracking-[0.3em] opacity-60">System Feed Status</span>
-              <div className="flex gap-1.5">
-                {[1, 1, 1, 1, 0].map((v, i) => (
-                  <div key={i} className={`w-10 h-1 rounded-full ${v ? 'bg-[#0d59f2] shadow-[0_0_8px_#0d59f2]' : 'bg-white/10'}`}></div>
-                ))}
-              </div>
+        {/* --- GLOBAL MARKET CONTEXT FOOTER --- */}
+        <div className="absolute bottom-0 left-0 right-0 border-t border-[#0d59f2]/30 bg-[#0a0e17]/95 backdrop-blur-xl p-0 flex justify-center z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+            {/* Widen container for better spacing on large screens */}
+            <div className="w-full max-w-[1600px] px-8 py-5 flex items-center justify-between gap-6">
+                
+                <div className="flex items-center gap-4 shrink-0">
+                    <div className="size-10 rounded-lg bg-[#0d59f2] flex items-center justify-center shadow-lg shadow-[#0d59f2]/20">
+                        <span className="material-symbols-outlined text-white text-2xl">public</span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-[#0d59f2] uppercase tracking-[0.2em]">Global Analysis Context</span>
+                        <span className="text-xs text-[#90a4cb] font-medium">Define your target asset and time horizon for the session.</span>
+                    </div>
+                </div>
+
+                {/* Central Control Block - Widened */}
+                <div className="flex-1 flex justify-center">
+                    <div className="flex items-center gap-8 bg-[#101622] border border-[#314368] rounded-2xl px-8 py-3 shadow-inner">
+                        
+                        {/* Asset Select */}
+                        <div className="flex flex-col">
+                            <label className="text-[8px] font-bold text-[#90a4cb] uppercase tracking-widest mb-1">Target Asset</label>
+                            <div className="relative group">
+                                <select 
+                                    value={selectedAssetCode}
+                                    onChange={(e) => handleContextUpdate('code', e.target.value)}
+                                    // Increased width to 240px
+                                    className="appearance-none bg-transparent text-white text-sm font-bold uppercase tracking-wide outline-none cursor-pointer w-[240px] border-b border-transparent group-hover:border-[#0d59f2] transition-colors pb-0.5 truncate"
+                                >
+                                    {AVAILABLE_ASSETS.map((group) => (
+                                        <optgroup key={group.label} label={group.label} className="bg-[#101622] text-[#90a4cb]">
+                                            {group.options.map(opt => (
+                                                <option key={opt.code} value={opt.code} className="text-white">{opt.name}</option>
+                                            ))}
+                                        </optgroup>
+                                    ))}
+                                </select>
+                                <span className="material-symbols-outlined absolute right-0 top-0 text-[#0d59f2] text-sm pointer-events-none">expand_more</span>
+                            </div>
+                        </div>
+
+                        <div className="w-px h-10 bg-[#314368]"></div>
+
+                        {/* Start Date */}
+                        <div className="flex flex-col">
+                            <label className="text-[8px] font-bold text-[#90a4cb] uppercase tracking-widest mb-1">Start Date</label>
+                            <input 
+                                type="date" 
+                                value={startDate}
+                                onChange={(e) => handleContextUpdate('start', e.target.value)}
+                                // Increased width to 160px for full date visibility
+                                className="bg-transparent text-white text-sm font-mono font-bold outline-none cursor-pointer hover:text-[#0d59f2] transition-colors w-[160px]"
+                            />
+                        </div>
+
+                        <div className="text-[#314368] font-bold text-xl">→</div>
+
+                        {/* End Date */}
+                        <div className="flex flex-col">
+                            <label className="text-[8px] font-bold text-[#90a4cb] uppercase tracking-widest mb-1">End Date</label>
+                            <input 
+                                type="date" 
+                                value={endDate}
+                                onChange={(e) => handleContextUpdate('end', e.target.value)}
+                                // Increased width to 160px for full date visibility
+                                className="bg-transparent text-white text-sm font-mono font-bold outline-none cursor-pointer hover:text-[#0d59f2] transition-colors w-[160px]"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-[9px] font-bold text-[#0bda5e] uppercase tracking-widest animate-pulse flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-[#0bda5e]"></span>
+                        Context Active
+                    </span>
+                </div>
+
             </div>
-            <div className="flex flex-col">
-              <span className="text-[9px] font-black text-[#94a3b8] uppercase tracking-[0.3em] opacity-60">Global Computation</span>
-              <span className="text-xs font-mono text-white mt-1">422 TFLOPS <span className="text-[#0bda5e] ml-2">+4.2%</span></span>
-            </div>
-          </div>
-          <div className="flex items-center gap-6 text-[#94a3b8] text-[10px] font-black uppercase tracking-[0.3em]">
-            <span className="flex items-center gap-2">Node: <span className="text-white font-mono uppercase tracking-tighter">Frankfurt-AWS-9</span></span>
-            <span className="size-1 rounded-full bg-white/20"></span>
-            <span className="flex items-center gap-2">Integrity: <span className="text-[#0bda5e] font-mono">100%</span></span>
-          </div>
         </div>
       </main>
 

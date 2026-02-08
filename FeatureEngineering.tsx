@@ -15,25 +15,28 @@ import {
   Area,
   Cell,
   ReferenceLine,
-  ScatterChart,
-  Scatter,
-  Brush,
   Legend
 } from 'recharts';
-import { PROCESSED_DATASET, PUSHED_ASSETS, DATA_LAYERS, FEATURE_VIEW_CACHE } from './GlobalState';
+import { PROCESSED_DATASET, DATA_LAYERS, FEATURE_VIEW_CACHE } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface FeatureEngineeringProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'api') => void;
 }
 
-// --- QUANT ENGINE (Deterministic Client-Side Math) ---
+// --- QUANT ENGINE (Strict Deterministic Math) ---
 const QuantMath = {
-    mean: (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length,
+    mean: (arr: number[]) => {
+        const valid = arr.filter(n => n !== null && !isNaN(n));
+        if (valid.length === 0) return 0;
+        return valid.reduce((a, b) => a + b, 0) / valid.length;
+    },
     
     std: (arr: number[]) => {
-        const m = QuantMath.mean(arr);
-        return Math.sqrt(arr.reduce((a, b) => a + Math.pow(b - m, 2), 0) / arr.length);
+        const valid = arr.filter(n => n !== null && !isNaN(n));
+        if (valid.length < 2) return 0;
+        const m = QuantMath.mean(valid);
+        return Math.sqrt(valid.reduce((a, b) => a + Math.pow(b - m, 2), 0) / (valid.length - 1));
     },
 
     rolling: (arr: number[], window: number, fn: (slice: number[]) => number) => {
@@ -42,7 +45,13 @@ const QuantMath = {
             if (i < window - 1) {
                 result.push(null);
             } else {
-                result.push(fn(arr.slice(i - window + 1, i + 1)));
+                const slice = arr.slice(i - window + 1, i + 1);
+                // Only calculate if slice has enough valid data
+                if (slice.every(v => v !== null && !isNaN(v))) {
+                    result.push(fn(slice as number[]));
+                } else {
+                    result.push(null);
+                }
             }
         }
         return result;
@@ -53,14 +62,18 @@ const QuantMath = {
         const res: (number | null)[] = [];
         for(let i=0; i<prices.length; i++) {
             if(i < window) res.push(null);
-            else res.push((prices[i] - prices[i-window]) / prices[i-window]);
+            else {
+                const prev = prices[i-window];
+                if (prev === 0 || prev === null) res.push(null);
+                else res.push((prices[i] - prev) / prev);
+            }
         }
         return res;
     },
 
     // 2. Volatility: Rolling Standard Deviation of Returns
     volatility: (prices: number[], window: number) => {
-        const returns = prices.map((p, i) => i === 0 ? 0 : Math.log(p / prices[i-1]));
+        const returns = prices.map((p, i) => (i === 0 || prices[i-1] === 0) ? 0 : Math.log(p / prices[i-1]));
         return QuantMath.rolling(returns, window, (slice) => QuantMath.std(slice) * Math.sqrt(252));
     },
 
@@ -73,30 +86,35 @@ const QuantMath = {
             gains.push(diff > 0 ? diff : 0);
             losses.push(diff < 0 ? Math.abs(diff) : 0);
         }
+        // RSI requires specialized rolling average (Wilder's Smoothing usually, keeping simple SMA for robustness here)
         const avgGain = QuantMath.rolling(gains, window, QuantMath.mean);
         const avgLoss = QuantMath.rolling(losses, window, QuantMath.mean);
         
         return prices.map((_, i) => {
             if (i < window) return null;
-            const rs = (avgGain[i-1] || 0) / (avgLoss[i-1] || 1);
+            const ag = avgGain[i-1];
+            const al = avgLoss[i-1];
+            
+            if (ag === null || al === null) return null;
+            if (al === 0) return 100;
+            
+            const rs = ag / al;
             return 100 - (100 / (1 + rs));
         });
     },
 
     // 4. Term Structure Proxy (Liquidity Pressure)
     termStructureProxy: (vol: number[], oi: number[]) => {
-        return vol.map((v, i) => oi[i] ? (v / oi[i]) * 100 : 0);
+        return vol.map((v, i) => {
+            if (oi[i] === 0 || oi[i] === null || isNaN(oi[i])) return null; // Return null if data missing
+            return (v / oi[i]) * 100;
+        });
     },
 
-    // 5. Deterministic "Yield Shock" Simulation
-    // Uses price fractal dimension proxy instead of random noise
-    yieldShockProxy: (prices: number[]) => {
-        return prices.map((p, i) => {
-            const idx = i + 1;
-            // Deterministic chaotic function based on price history
-            const val = Math.sin(idx * 0.2) * Math.cos(p / 100) + (Math.sin(p) * 0.5);
-            return val; 
-        });
+    // 5. External Data Pass-through (GEO Factors)
+    // Simply normalizes the fused layer data (e.g. GDD or Precip)
+    externalSignal: (layerValues: (number | undefined)[]) => {
+        return layerValues.map(v => (v === undefined || v === null || isNaN(v)) ? null : v);
     },
 
     // Evaluation Metrics
@@ -119,6 +137,7 @@ const QuantMath = {
             den1 += Math.pow(x[i] - xMean, 2);
             den2 += Math.pow(y[i] - yMean, 2);
         }
+        if (den1 === 0 || den2 === 0) return 0;
         return num / Math.sqrt(den1 * den2);
     },
 
@@ -129,6 +148,8 @@ const QuantMath = {
                 pairs.push({ f: factor[i]!, r: fwdReturns[i]! });
             }
         }
+        if (pairs.length < buckets) return [];
+
         pairs.sort((a, b) => a.f - b.f);
         
         const chunkSize = Math.floor(pairs.length / buckets);
@@ -136,6 +157,10 @@ const QuantMath = {
         
         for(let i=0; i<buckets; i++) {
             const slice = pairs.slice(i * chunkSize, (i+1) * chunkSize);
+            if (slice.length === 0) {
+                results.push({ group: `Q${i+1}`, ret: 0 });
+                continue;
+            }
             const avgRet = slice.reduce((sum, p) => sum + p.r, 0) / slice.length;
             results.push({ group: `Q${i+1}`, ret: avgRet * 100 }); 
         }
@@ -160,7 +185,9 @@ const FACTOR_TEMPLATES = [
   { id: 'rsi_14', name: 'RSI (14)', category: 'MARKET', desc: 'Relative Strength Index. Detects overbought/oversold conditions.', code: 'ta.RSI(df["close"], timeperiod=14)', params: { window: 14 } },
   { id: 'liq_pressure', name: 'Liquidity Pressure', category: 'MARKET', desc: 'Vol/OI Ratio. Indicates speculative heat vs hedging.', code: 'df["volume"] / df["open_interest"]', params: {} },
   { id: 'basis_mom', name: 'Basis Momentum', category: 'FUNDAMENTAL', desc: 'Change rate of (Spot - Future). Signals supply tightness.', code: '(df["spot"] - df["close"]).diff(5)', params: { window: 5 } },
-  { id: 'yield_shock', name: 'Yield Shock Signal', category: 'GEO', desc: 'NDVI deviation from 5y avg. Predicts supply shocks.', code: '(df["ndvi"] - df["ndvi_5y_avg"]) / df["ndvi_5y_std"]', params: {} }
+  // Restored GEO Factors
+  { id: 'geo_gdd', name: 'GDD Accumulation', category: 'GEO', desc: 'Cumulative Growing Degree Days. Requires fused Weather Layer.', code: 'df["layer_value"].cumsum()', params: {} },
+  { id: 'geo_raw', name: 'Raw External Signal', category: 'GEO', desc: 'Direct mapping of fused external layer (e.g. NDVI/Soil).', code: 'df["layer_value"]', params: {} },
 ];
 
 interface CalculationCacheItem {
@@ -211,29 +238,22 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
 
   // --- 1. Load Data & Persistence Logic ---
   useEffect(() => {
-      // Logic: If new data arrived (timestamp > cache), clear cache and load new.
-      // If no new data, check if cache exists and restore it.
-      
       const hasNewData = PROCESSED_DATASET.ready && PROCESSED_DATASET.timestamp > FEATURE_VIEW_CACHE.timestamp;
       
       if (hasNewData) {
-          // New Data Ingest
           setActiveDataset(PROCESSED_DATASET);
           const initialData = PROCESSED_DATASET.data.map(d => ({ ...d, factor: null }));
           setChartData(initialData);
           
-          // Clear Cache
           setActiveFactors([]);
           setSelectedFactorId(null);
           setMetrics({ ic: 0, ir: 0, autocorr: 0, turnover: 0 });
           setQuantileData([]);
           setAiAudit(null);
           
-          // Update Cache Marker
           FEATURE_VIEW_CACHE.timestamp = PROCESSED_DATASET.timestamp;
       } else if (FEATURE_VIEW_CACHE.activeFactors.length > 0) {
-          // Restore View
-          setActiveDataset(PROCESSED_DATASET); // Underlying data is same
+          setActiveDataset(PROCESSED_DATASET); 
           setActiveFactors(FEATURE_VIEW_CACHE.activeFactors);
           setSelectedFactorId(FEATURE_VIEW_CACHE.selectedFactorId);
           setChartData(FEATURE_VIEW_CACHE.chartData);
@@ -241,14 +261,12 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
           setQuantileData(FEATURE_VIEW_CACHE.quantileData);
           setAiAudit(FEATURE_VIEW_CACHE.aiAudit);
       } else if (PROCESSED_DATASET.ready) {
-          // First Init
           setActiveDataset(PROCESSED_DATASET);
           setChartData(PROCESSED_DATASET.data.map(d => ({ ...d, factor: null })));
           FEATURE_VIEW_CACHE.timestamp = PROCESSED_DATASET.timestamp;
       }
   }, []);
 
-  // Update Cache on State Change
   useEffect(() => {
       if (activeDataset) {
           FEATURE_VIEW_CACHE.activeFactors = activeFactors;
@@ -261,24 +279,32 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   }, [activeFactors, selectedFactorId, chartData, metrics, quantileData, aiAudit]);
 
   // --- 2. Deterministic Calculation Engine ---
-  // Helper for computing factor values (used in chart and push)
-  const computeFactorValues = (prices: number[], volumes: number[], oi: number[], tmplId: string) => {
+  const computeFactorValues = (prices: number[], volumes: number[], oi: number[], layerValues: (number|undefined)[], tmplId: string) => {
       if (tmplId === 'mom_10') return QuantMath.momentum(prices, 10);
       else if (tmplId === 'vol_20') return QuantMath.volatility(prices, 20);
       else if (tmplId === 'rsi_14') return QuantMath.rsi(prices, 14);
       else if (tmplId === 'liq_pressure') return QuantMath.termStructureProxy(volumes, oi);
       else if (tmplId === 'basis_mom') return QuantMath.momentum(prices, 5).map(v => v ? -v : null); 
-      else if (tmplId === 'yield_shock') return QuantMath.yieldShockProxy(prices); 
-      else return prices.map((p, i) => Math.sin(i * 0.2) * Math.cos(p/100)); // Fallback
+      // GEO Handling
+      else if (tmplId === 'geo_raw') return QuantMath.externalSignal(layerValues);
+      else if (tmplId === 'geo_gdd') {
+          // Accumulate the layer values (assuming layerValues are daily GDD)
+          let sum = 0;
+          return layerValues.map(v => {
+              if (v === undefined || v === null || isNaN(v)) return null;
+              sum += v;
+              return sum;
+          });
+      }
+      // STRICT: Return NULL for unknown or uncalculable factors. No Simulation.
+      else return prices.map(() => null); 
   };
 
   const calculateFactor = (factorId: string, templateId?: string) => {
       if (!activeDataset) return;
 
-      // Reset AI Audit when factor changes
       setAiAudit(null);
 
-      // CHECK CACHE FIRST (Local component cache)
       if (calculationCache.current[factorId]) {
           const cached = calculationCache.current[factorId];
           setChartData(cached.chartData);
@@ -290,9 +316,9 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       const prices = activeDataset.data.map((d: any) => d.adjusted);
       const volumes = activeDataset.data.map((d: any) => d.volume);
       const oi = activeDataset.data.map((d: any) => d.openInterest);
+      // Extract fused layer data (if present)
+      const layerValues = activeDataset.data.map((d: any) => d.layerValue);
       
-      // Logic Mapping
-      // If templateId is missing (e.g. restoration), infer from ID or activeFactors
       let tId = templateId;
       if (!tId) {
           const f = activeFactors.find(f => f.id === factorId);
@@ -301,31 +327,29 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
           }
       }
 
-      const factorValues = computeFactorValues(prices, volumes, oi, tId || 'UNKNOWN');
+      const factorValues = computeFactorValues(prices, volumes, oi, layerValues, tId || 'UNKNOWN');
 
-      // Update Chart Data
       const newData = activeDataset.data.map((d: any, i: number) => ({
           ...d,
           factor: factorValues[i]
       }));
       setChartData(newData);
 
-      // Compute Forward Returns (1-day) for IC calculation
       const fwdReturns = [];
       for(let i=0; i<prices.length-1; i++) {
           fwdReturns.push((prices[i+1] - prices[i]) / prices[i]);
       }
       fwdReturns.push(null); 
 
-      // Compute Metrics
       const ic = QuantMath.calculateIC(factorValues, fwdReturns);
       const qRets = QuantMath.calculateQuantileReturns(factorValues, fwdReturns);
       
-      // Auto-Correlation (Lag 1)
       let autocorr = 0;
-      if (factorValues.length > 2) {
-          const f0 = factorValues.slice(0, -1);
-          const f1 = factorValues.slice(1);
+      // Calculate autocorrelation only on valid non-null sequences
+      const validFactors = factorValues.filter(v => v !== null) as number[];
+      if (validFactors.length > 2) {
+          const f0 = validFactors.slice(0, -1);
+          const f1 = validFactors.slice(1);
           autocorr = QuantMath.calculateIC(f0, f1); 
       }
 
@@ -339,7 +363,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       setMetrics(calculatedMetrics);
       setQuantileData(qRets);
 
-      // SAVE TO LOCAL CACHE
       calculationCache.current[factorId] = {
           factorValues,
           chartData: newData,
@@ -349,7 +372,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   };
 
   const handleAddFactor = (template: any) => {
-      // Check if already added
       const existing = activeFactors.find(f => f.name === template.name);
       if (existing) {
           setSelectedFactorId(existing.id);
@@ -483,11 +505,9 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   const handlePushToFusion = () => {
       if (!activeDataset || activeFactors.length === 0) return;
 
-      // 1. Prepare Base Data (OHLCV)
-      // Map raw data to a Fusion-ready format
       const fusionData = activeDataset.data.map((d: any) => ({
           date: d.date,
-          open: d.raw, // Original Close as raw price proxy
+          open: d.raw, 
           high: d.high || d.raw,
           low: d.low || d.raw,
           close: d.adjusted,
@@ -497,8 +517,8 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       const prices = activeDataset.data.map((d: any) => d.adjusted);
       const volumes = activeDataset.data.map((d: any) => d.volume);
       const oi = activeDataset.data.map((d: any) => d.openInterest);
+      const layerValues = activeDataset.data.map((d: any) => d.layerValue);
 
-      // 2. Re-Calculate ALL Active Factors
       const featureNames: string[] = [];
       
       activeFactors.forEach(factor => {
@@ -507,21 +527,19 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
               tId = factor.id.split('_')[0] + '_' + factor.id.split('_')[1];
           }
           
-          const values = computeFactorValues(prices, volumes, oi, tId || 'UNKNOWN');
+          const values = computeFactorValues(prices, volumes, oi, layerValues, tId || 'UNKNOWN');
           
-          // Append to fusion data rows
           fusionData.forEach((row: any, i: number) => {
               row[factor.name] = values[i];
           });
           featureNames.push(factor.name);
       });
 
-      // 3. Push Payload to Global State
       DATA_LAYERS.set('engineered_features', {
           sourceId: 'engineered_features',
           name: 'Engineered Alpha Set',
           metricName: `${activeFactors.length} Factors`,
-          data: [], // No simple visualization needed here
+          data: [], 
           fusionPackage: {
               data: fusionData,
               features: featureNames,
@@ -546,7 +564,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
     }
   };
 
-  // Helper for Global Tooltips
   const handleTooltip = (e: React.MouseEvent, text: string) => {
       const rect = e.currentTarget.getBoundingClientRect();
       setGlobalTooltip({
@@ -595,7 +612,7 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       </nav>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar Nav (Pipeline Layers) */}
+        {/* Sidebar Nav */}
         <aside className="w-64 border-r border-[#222f49] bg-[#101622] flex flex-col shrink-0">
           <div className="p-6">
             <p className="text-xs font-bold uppercase tracking-widest text-[#90a4cb] mb-4">Pipeline Layers</p>
@@ -618,9 +635,9 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
           </div>
         </aside>
 
-        {/* Main Content (Workbench) */}
+        {/* Main Content */}
         <main className="flex-1 bg-[#0b0f1a] relative overflow-hidden flex flex-col">
-            {/* Top Control Bar (Inside Main) */}
+            {/* Top Control Bar */}
             <div className="h-14 border-b border-[#222f49] bg-[#161d2b] px-6 flex items-center justify-end z-40 shrink-0 gap-3">
                 <div className="mr-auto flex items-center gap-2">
                     <span className="material-symbols-outlined text-[#0d59f2]">science</span>
@@ -717,7 +734,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                     <div className="flex-1 p-4 overflow-y-auto custom-scrollbar flex flex-col gap-4">
                         {selectedFactorId && activeFactorDef ? (
                             <div className="flex flex-col h-full gap-4">
-                                {/* Header Info */}
                                 <div className="flex justify-between items-center">
                                     <div>
                                         <h2 className="text-lg font-bold text-white flex items-center gap-2">
@@ -729,14 +745,12 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                                         </p>
                                     </div>
                                     
-                                    {/* Factor Switcher - FIXED SCROLLING */}
                                     <div className="flex gap-1 overflow-x-auto max-w-[400px] no-scrollbar pb-1">
                                         {activeFactors.map(f => (
                                             <button 
                                                 key={f.id}
                                                 onClick={() => { 
                                                     setSelectedFactorId(f.id); 
-                                                    // Pass simpler ID for templates to trigger logic mapping
                                                     const tmplId = f.source === 'TEMPLATE' ? f.id.split('_')[0] + '_' + f.id.split('_')[1] : undefined;
                                                     calculateFactor(f.id, tmplId); 
                                                 }} 
@@ -748,7 +762,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                                     </div>
                                 </div>
 
-                                {/* Main Chart */}
                                 <div className="flex-1 bg-[#182234] border border-[#314368] rounded-xl p-4 min-h-[300px] relative">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -768,9 +781,8 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                                                 labelStyle={{ color: '#90a4cb', marginBottom: '4px' }}
                                             />
                                             <Legend verticalAlign="top" height={36}/>
-                                            <Area yAxisId="left" type="monotone" dataKey="adjusted" stroke="#555" fill="#555" fillOpacity={0.1} strokeWidth={1} name="Asset Price" />
-                                            <Line yAxisId="right" type="monotone" dataKey="factor" stroke="#0d59f2" strokeWidth={2} dot={false} name="Factor Score" />
-                                            {/* Zero Line */}
+                                            <Area yAxisId="left" type="monotone" dataKey="adjusted" stroke="#555" fill="#555" fillOpacity={0.1} strokeWidth={1} name="Asset Price" connectNulls={false} />
+                                            <Line yAxisId="right" type="monotone" dataKey="factor" stroke="#0d59f2" strokeWidth={2} dot={false} name="Factor Score" connectNulls={false} />
                                             <ReferenceLine yAxisId="right" y={0} stroke="#314368" strokeDasharray="3 3" />
                                         </ComposedChart>
                                     </ResponsiveContainer>
@@ -865,7 +877,7 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                             </p>
                         </div>
 
-                        {/* 4. AI Factor Audit (New Section) */}
+                        {/* 4. AI Factor Audit */}
                         <div className="border-t border-[#314368] pt-4 mt-2">
                             <h3 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest mb-3 flex items-center gap-2">
                                 <span className="material-symbols-outlined text-sm text-[#0d59f2]">smart_toy</span>
