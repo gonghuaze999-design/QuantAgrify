@@ -1,0 +1,11 @@
+
+{
+  "description": "QuantAgrify Professional LTS - Version 2.9.7 (Nightly Snapshot). System Logic Verified: 'Data Starvation' handling confirmed correct for inactive assets (e.g. Apple). Core Algorithm Pipeline stable.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "name": "QuantAgrify v2.9.7 Nightly",
+  "version": "2.9.7-snapshot"
+}
