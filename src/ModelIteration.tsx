@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import {
@@ -185,16 +186,20 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
       const weights = activeModel.package.attribution.weights;
       return Object.entries(weights).map(([name, weight]) => ({
           name, 
-          weight: parseFloat((weight * 100).toFixed(1))
+          weight: parseFloat((Number(weight) * 100).toFixed(1))
       })).sort((a, b) => b.weight - a.weight);
   }, [activeModel]);
 
   const rollingSharpeData = useMemo(() => {
       if (!activeModel) return [];
       // Calculate 30-day Rolling Sharpe
-      const returns = activeModel.package.timeSeries.map((d, i) => 
-          i === 0 ? 0 : (d.equity - activeModel.package.timeSeries[i-1].equity) / activeModel.package.timeSeries[i-1].equity
-      );
+      const ts = activeModel.package.timeSeries;
+      const returns = ts.map((d, i) => {
+          if (i === 0) return 0;
+          const prev = ts[i-1];
+          if (!prev) return 0;
+          return (d.equity - prev.equity) / prev.equity;
+      });
       
       const window = 22; // ~1 Month
       const heatPoints = [];

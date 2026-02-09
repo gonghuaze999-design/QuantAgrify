@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Tooltip } from 'recharts';
-import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, getTrendColor } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface PolicySentimentProps {
@@ -354,11 +354,13 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
 
   // --- Visual Helpers ---
   const getBiasColor = (bias: string) => {
-      switch(bias) {
-          case 'BULLISH': return 'text-[#0bda5e] bg-[#0bda5e]/10 border-[#0bda5e]/20';
-          case 'BEARISH': return 'text-[#fa6238] bg-[#fa6238]/10 border-[#fa6238]/20';
-          default: return 'text-slate-400 bg-slate-800/50 border-slate-700';
-      }
+      // Use getTrendColor with background and border classes
+      const base = getTrendColor(bias, 'text');
+      const bg = `bg-[${getTrendColor(bias, 'stroke')}]/10`;
+      const border = `border-[${getTrendColor(bias, 'stroke')}]/20`;
+      
+      if (bias === 'NEUTRAL') return 'text-slate-400 bg-slate-800/50 border-slate-700';
+      return `${base} ${bg} ${border}`;
   };
 
   const handleDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -567,8 +569,8 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
                             <div className="flex justify-between items-center mb-1">
                                 <span className="text-[9px] text-[#90a4cb] font-bold uppercase">{item.sourceName} • {item.timestamp}</span>
                                 <div className={`size-2 rounded-full ${
-                                    item.tradeBias === 'BULLISH' ? 'bg-[#0bda5e]' : 
-                                    item.tradeBias === 'BEARISH' ? 'bg-[#fa6238]' : 'bg-slate-500'
+                                    item.tradeBias === 'BULLISH' ? getTrendColor('BULLISH', 'bg') : 
+                                    item.tradeBias === 'BEARISH' ? getTrendColor('BEARISH', 'bg') : 'bg-slate-500'
                                 }`}></div>
                             </div>
                             

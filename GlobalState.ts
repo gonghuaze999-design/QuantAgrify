@@ -23,7 +23,52 @@ export const GLOBAL_MARKET_CONTEXT = {
     asset: { code: 'C9999.XDCE', name: 'Corn (玉米)' }, // Default Focus
     startDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
-    isContextSet: false // Flag to check if user actively set this
+    isContextSet: false, // Flag to check if user actively set this
+    colorMode: 'US' as 'US' | 'CN' // 'US': Green Up/Red Down, 'CN': Red Up/Green Down
+};
+
+// === COLOR UTILITY HELPER ===
+export const getTrendColor = (value: number | string, type: 'text' | 'bg' | 'stroke' | 'fill' = 'text') => {
+    const mode = GLOBAL_MARKET_CONTEXT.colorMode;
+    let isPositive = false;
+
+    if (typeof value === 'number') {
+        isPositive = value >= 0;
+    } else if (typeof value === 'string') {
+        const v = value.toUpperCase();
+        if (v === 'BULLISH' || v === 'LONG' || v === 'PROFIT' || v === 'STRONG BUY' || v === 'ACCUMULATE' || v === 'TIGHTENING') isPositive = true;
+        else if (v === 'BEARISH' || v === 'SHORT' || v === 'LOSS' || v === 'SELL' || v === 'LOOSENING') isPositive = false;
+        else if (v.includes('+')) isPositive = true;
+        else if (v.includes('-')) isPositive = false;
+        else isPositive = true; // Default to positive style for neutral/unknown strings unless explicitly negative
+    }
+
+    // Define Base Colors
+    const GREEN = '#0bda5e';
+    const RED = '#fa6238';
+
+    // Logic: 
+    // US Mode: Up/Positive = Green, Down/Negative = Red
+    // CN Mode: Up/Positive = Red, Down/Negative = Green
+    const colorUp = mode === 'CN' ? RED : GREEN;
+    const colorDown = mode === 'CN' ? GREEN : RED;
+
+    const finalColor = isPositive ? colorUp : colorDown;
+
+    if (type === 'stroke' || type === 'fill') return finalColor;
+    
+    // For Tailwind classes, we use arbitrary values. 
+    // Note: React re-renders will pick up the new class string.
+    if (type === 'bg') return `bg-[${finalColor}]`;
+    return `text-[${finalColor}]`;
+};
+
+// === NEW: CUSTOM UPLOAD MODULE CACHE ===
+export const CUSTOM_UPLOAD_STATE = {
+    initialized: false,
+    library: [] as any[], // Holds KnowledgeAsset[]
+    nodes: [] as any[],   // Holds GraphNode[]
+    storageUsed: 0
 };
 
 // 2. Shared Exchange Configuration

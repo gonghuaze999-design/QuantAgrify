@@ -17,7 +17,7 @@ import {
   AreaChart,
   Brush 
 } from 'recharts';
-import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, getTrendColor } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface SupplyDemandProps {
@@ -579,7 +579,6 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
             }
           `;
 
-          // Fixed: Use 'gemini-3-flash-preview' for complex text tasks with search grounding as per coding guidelines
           const response = await ai.models.generateContent({
               model: "gemini-3-flash-preview",
               contents: prompt,
@@ -736,7 +735,6 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
           {navItems.map((item) => (
             <button 
               key={item.label}
-              // Fixed: Corrected comparison to check against 'dataSource' module ID to avoid type overlap error
               onClick={() => item.view !== 'dataSource' && onNavigate(item.view)}
               className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
@@ -912,8 +910,8 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
                                 <div className="flex flex-col gap-1">
                                     <span className="text-[9px] text-[#90a4cb] font-bold uppercase tracking-widest">Balance Trend</span>
                                     <div className={`text-xs font-black px-3 py-2 rounded border text-center uppercase ${
-                                        aiAnalysis.balanceTrend === 'TIGHTENING' ? 'text-[#0bda5e] bg-[#0bda5e]/10 border-[#0bda5e]/20' :
-                                        aiAnalysis.balanceTrend === 'LOOSENING' ? 'text-[#fa6238] bg-[#fa6238]/10 border-[#fa6238]/20' :
+                                        aiAnalysis.balanceTrend === 'TIGHTENING' ? getTrendColor('BULLISH', 'bg') + '/10 ' + getTrendColor('BULLISH', 'text') + ' ' + getTrendColor('BULLISH', 'text').replace('text', 'border') + '/20' :
+                                        aiAnalysis.balanceTrend === 'LOOSENING' ? getTrendColor('BEARISH', 'bg') + '/10 ' + getTrendColor('BEARISH', 'text') + ' ' + getTrendColor('BEARISH', 'text').replace('text', 'border') + '/20' :
                                         'text-white bg-slate-700 border-slate-600'
                                     }`}>
                                         {aiAnalysis.balanceTrend}
@@ -997,8 +995,8 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
                     <h3 className="text-xl font-bold text-white tracking-tight break-words" title={String(stat.val)}>{stat.val}</h3>
                     <div className="flex justify-between items-end mt-1">
                         <p className={`text-[10px] font-bold uppercase tracking-wide ${
-                            String(stat.trend).includes('-') ? 'text-[#fa6238]' : 
-                            String(stat.trend).includes('%') && !String(stat.trend).includes('-') ? 'text-[#0bda5e]' : 
+                            String(stat.trend).includes('-') ? getTrendColor(-1) : 
+                            String(stat.trend).includes('%') && !String(stat.trend).includes('-') ? getTrendColor(1) : 
                             'text-[#0d59f2]'
                         }`}>
                             {String(stat.trend).includes('%') && Number(String(stat.trend).replace('%','')) > 0 ? '+' : ''}{stat.trend}
@@ -1079,8 +1077,8 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
                                 <div className="flex justify-between items-start mb-2">
                                     <span className="text-xs font-bold text-white uppercase">{driver.name}</span>
                                     <span className={`text-[9px] font-black px-2 py-0.5 rounded border uppercase ${
-                                        driver.impact === 'BULLISH' ? 'text-[#0bda5e] bg-[#0bda5e]/10 border-[#0bda5e]/30' :
-                                        driver.impact === 'BEARISH' ? 'text-[#fa6238] bg-[#fa6238]/10 border-[#fa6238]/30' :
+                                        driver.impact === 'BULLISH' ? getTrendColor(100, 'bg') + '/10 ' + getTrendColor(100, 'text') + ' ' + getTrendColor(100, 'text').replace('text', 'border') + '/30' :
+                                        driver.impact === 'BEARISH' ? getTrendColor(-100, 'bg') + '/10 ' + getTrendColor(-100, 'text') + ' ' + getTrendColor(-100, 'text').replace('text', 'border') + '/30' :
                                         'text-slate-400 bg-slate-800 border-slate-700'
                                     }`}>
                                         {driver.impact}
@@ -1089,8 +1087,8 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
                                 <div className="w-full bg-[#182234] h-1.5 rounded-full overflow-hidden flex">
                                     <div 
                                         className={`h-full ${
-                                            driver.impact === 'BULLISH' ? 'bg-[#0bda5e]' : 
-                                            driver.impact === 'BEARISH' ? 'bg-[#fa6238]' : 'bg-slate-500'
+                                            driver.impact === 'BULLISH' ? getTrendColor(100, 'bg') : 
+                                            driver.impact === 'BEARISH' ? getTrendColor(-100, 'bg') : 'bg-slate-500'
                                         }`} 
                                         style={{ width: `${driver.strength}%` }}
                                     ></div>

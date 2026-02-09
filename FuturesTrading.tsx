@@ -10,14 +10,13 @@ import {
   Tooltip, 
   ResponsiveContainer, 
   Brush,
-  ReferenceLine,
   RadarChart,
   PolarGrid,
   PolarAngleAxis,
   PolarRadiusAxis,
   Radar
 } from 'recharts';
-import { EXCHANGE_MAPPING, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS, GLOBAL_MARKET_CONTEXT, DATA_LAYERS } from './GlobalState';
+import { EXCHANGE_MAPPING, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS, GLOBAL_MARKET_CONTEXT, DATA_LAYERS, getTrendColor } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface FuturesTradingProps {
@@ -160,33 +159,27 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       if (GLOBAL_MARKET_CONTEXT.isContextSet) {
           const sig = `${GLOBAL_MARKET_CONTEXT.asset.code}|${GLOBAL_MARKET_CONTEXT.startDate}|${GLOBAL_MARKET_CONTEXT.endDate}`;
           if (sig !== FUTURES_CACHE.lastSyncedSignature) {
-              // Parse Global Asset Code (e.g., C9999.XDCE)
               const code = GLOBAL_MARKET_CONTEXT.asset.code; 
               const parts = code.split('.');
               
-              // Only sync if format matches supported futures logic
               if (parts.length === 2) {
                   const suffix = '.' + parts[1];
-                  const variety = parts[0].replace(/[0-9]+|1!/g, ''); // Extract 'C' from 'C9999' or 'ZC' from 'ZC1!'
+                  const variety = parts[0].replace(/[0-9]+|1!/g, ''); 
 
-                  // Check if the extracted exchange suffix exists in our mapping
                   if (EXCHANGE_MAPPING[suffix]) {
                       console.log(`[FuturesTrading] Global Sync: ${code} -> ${variety} on ${suffix}`);
                       setActiveExchange(suffix);
                       setActiveVariety(variety);
-                      setIsManualMode(false); // Prefer auto-variety mode when possible
+                      setIsManualMode(false);
                   } else {
-                      // Fallback for foreign/unknown exchanges -> Manual Mode
                       console.log(`[FuturesTrading] Global Sync (Manual Fallback): ${code}`);
                       setIsManualMode(true);
                       setManualSymbolInput(code);
                   }
                   
-                  // Sync Dates
                   setStartDate(GLOBAL_MARKET_CONTEXT.startDate);
                   setEndDate(GLOBAL_MARKET_CONTEXT.endDate);
                   
-                  // Update signature to prevent loop
                   FUTURES_CACHE.lastSyncedSignature = sig;
               }
           }
@@ -199,11 +192,9 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       setIsPushed(PUSHED_ASSETS.has(id));
   }, [activeVariety, activeExchange]);
 
-  // --- Logic 3: Push to Model (Enhanced) ---
   const handlePushToModel = () => {
       const id = `${activeVariety}${activeExchange}`;
       
-      // 1. Maintain Legacy Context for Algorithm Workflow (fetches fresh data based on params)
       PUSHED_ASSETS.add(id);
       PUSHED_ASSET_CONTEXTS.set(id, {
           symbol: activeSymbol, 
@@ -214,18 +205,15 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
           dataSourceName: dataSourceName
       });
 
-      // 2. NEW: Push High-Res Data Package to Data Bus (For Fusion/Cockpit immediate usage)
       DATA_LAYERS.set('futures_market', {
           sourceId: 'futures_market',
           name: `Futures Market: ${activeVariety}`,
           metricName: 'Price & Sentiment',
-          // Lightweight Series for global preview
           data: marketData.map(d => ({
               date: d.date,
               value: d.close,
               meta: { vol: d.volume, open: d.open, high: d.high, low: d.low }
           })),
-          // Full Payload
           futuresPackage: {
               marketData: marketData,
               sentiment: aiSentiment,
@@ -242,26 +230,22 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       setIsPushed(true);
   };
 
-  // --- Logic: Handle Exchange Change ---
   const handleExchangeChange = (newExchange: string) => {
       setActiveExchange(newExchange);
-      // Automatically select the first variety of the new exchange to prevent invalid combinations
       const firstVariety = EXCHANGE_MAPPING[newExchange]?.varieties[0]?.code || '';
       setActiveVariety(firstVariety);
   };
 
-  // --- AI Logic: Specific Sentiment Analysis ---
   const fetchSpecificSentiment = async (varietyCode: string, exchangeName: string) => {
       if (!process.env.API_KEY) return;
 
-      // Caching Check
       const sentimentKey = `${varietyCode}-${exchangeName}`;
       const now = Date.now();
-      const CACHE_DURATION = 10 * 60 * 1000; // 10 Minutes
+      const CACHE_DURATION = 10 * 60 * 1000; 
 
       if (sentimentKey === FUTURES_CACHE.lastSentimentKey && (now - FUTURES_CACHE.lastSentimentUpdate < CACHE_DURATION)) {
           console.log("[FuturesTrading] Using Cached Sentiment");
-          return; // Skip execution, state already populated from cache
+          return; 
       }
 
       setAiSentiment(prev => ({ ...prev, loading: true, summary: "Analyzing specific regional supply chain data..." }));
@@ -327,7 +311,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                       ]
                   };
                   setAiSentiment(newSentiment);
-                  // Update Cache
                   FUTURES_CACHE.aiSentiment = newSentiment;
                   FUTURES_CACHE.lastSentimentUpdate = Date.now();
                   FUTURES_CACHE.lastSentimentKey = sentimentKey;
@@ -339,22 +322,15 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       }
   };
 
-  // --- Data Fetching ---
   const fetchData = async () => {
-    // Generate a unique key for current parameters
     const currentKey = `${activeVariety}-${activeExchange}-${startDate}-${endDate}-${isManualMode ? manualSymbolInput : ''}`;
     
-    // CACHE CHECK: If parameters haven't changed and we have data, DO NOT fetch.
     if (FUTURES_CACHE.hasData && FUTURES_CACHE.lastFetchKey === currentKey) {
-        // console.log("Using Cached Futures Data (No Refresh)");
-        // Restore zoom indices if needed
         if (marketData.length > 0) {
              const len = marketData.length;
              setLeftIndex(len > 50 ? len - 50 : 0);
              setRightIndex(len - 1);
         }
-        
-        // Even if data is cached, check if we need to refresh sentiment (e.g. timeout)
         fetchSpecificSentiment(activeVariety, EXCHANGE_MAPPING[activeExchange]?.name || activeExchange);
         return;
     }
@@ -362,7 +338,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
     setLoading(true);
     setError(null);
 
-    // Trigger AI Analysis in parallel (only if data is being fetched)
     fetchSpecificSentiment(activeVariety, EXCHANGE_MAPPING[activeExchange]?.name || activeExchange);
 
     const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
@@ -386,10 +361,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
         if (isManualMode) {
             targetSymbol = manualSymbolInput;
         } else {
-            // Construct default index symbol: e.g., "C9999.XDCE"
             targetSymbol = `${activeVariety}9999${activeExchange}`;
-            
-            // Try to get Dominant Contract (Optional enhancement)
             try {
                 const domRes = await fetch(`${bridgeUrl}/api/jqdata/dominant`, {
                     method: 'POST',
@@ -405,7 +377,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                     const domData = await domRes.json();
                     if (domData.success && domData.dominant) {
                         targetSymbol = domData.dominant;
-                        // Ensure correct suffix override if API returns bare code without suffix
                         if(!targetSymbol.includes('.')) targetSymbol += activeExchange;
                     }
                 }
@@ -416,7 +387,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
         setActiveSymbol(targetSymbol);
 
-        // Fetch Price Data
         const priceRes = await fetch(`${bridgeUrl}/api/jqdata/price`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -425,7 +395,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                 password: jqNode.password,
                 symbol: targetSymbol,
                 frequency: 'daily',
-                count: 500, // This is optional if dates are provided
+                count: 500, 
                 start_date: startDate,
                 end_date: endDate
             })
@@ -439,10 +409,8 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
         if (priceData.success && priceData.data && priceData.data.length > 0) {
             setMarketData(priceData.data);
-            // Update Cache Key on success
             FUTURES_CACHE.lastFetchKey = currentKey;
             
-            // Reset Zoom to show last 50 candles initially, or full if less
             const len = priceData.data.length;
             setLeftIndex(len > 50 ? len - 50 : 0);
             setRightIndex(len - 1);
@@ -460,14 +428,11 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
     }
   };
 
-  // Re-fetch trigger
   useEffect(() => {
     fetchData();
   }, [activeVariety, activeExchange, startDate, endDate, isManualMode, manualSymbolInput]); 
 
-  // --- Zoom Logic (Fixed) ---
   const handleWheel = (e: any) => {
-      // If we don't have data, don't zoom
       if (!marketData.length) return;
       
       const len = marketData.length;
@@ -484,13 +449,11 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       let newRight = currentRight;
 
       if (e.deltaY < 0) {
-          // Zoom In
           if (range > 10) { 
               newLeft = Math.min(currentLeft + zoomSpeed, currentRight - 10);
               newRight = Math.max(currentRight - zoomSpeed, currentLeft + 10);
           }
       } else {
-          // Zoom Out
           newLeft = Math.max(0, currentLeft - zoomSpeed);
           newRight = Math.min(len - 1, currentRight + zoomSpeed);
       }
@@ -511,8 +474,8 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
           price: last.close.toFixed(1),
           change: (isUp ? '+' : '') + change.toFixed(1),
           pct: (isUp ? '+' : '') + pct.toFixed(2) + '%',
-          color: isUp ? 'text-[#0bda5e]' : 'text-[#fa6238]',
-          bg: isUp ? 'bg-[#0bda5e]/10 border-[#0bda5e]/20' : 'bg-[#fa6238]/10 border-[#fa6238]/20',
+          color: getTrendColor(change, 'text'),
+          bg: `bg-[${getTrendColor(change, 'stroke')}]/10 border-[${getTrendColor(change, 'stroke')}]/20`,
           vol: last.volume.toLocaleString()
       };
   };
@@ -537,8 +500,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
           {navItems.map((item) => (
             <button 
               key={item.label}
-              // Fixed: Changed 'futuresTrading' to 'dataSource' to match navItems's available view types
-              // and properly identify the parent active section.
               onClick={() => item.view !== 'dataSource' && onNavigate(item.view)}
               className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
@@ -605,7 +566,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                 <span className="text-xs font-mono font-bold text-emerald-400 truncate max-w-[100px]">{dataSourceName}</span>
               </div>
               <button 
-                onClick={() => { FUTURES_CACHE.lastFetchKey = ''; fetchData(); }} // Force Refresh Button
+                onClick={() => { FUTURES_CACHE.lastFetchKey = ''; fetchData(); }} 
                 className="flex items-center justify-center rounded-lg bg-[#182234] hover:bg-[#314368] p-2 border border-[#314368] transition-all group"
                 title="Force Refresh Data"
               >
@@ -641,7 +602,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
               <div className="grid grid-cols-12 gap-4 items-end">
                 {!isManualMode ? (
                     <>
-                        {/* Exchange Selector - PRIMARY */}
                         <label className="flex flex-col col-span-3">
                             <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
                                 <span className="material-symbols-outlined text-sm">account_balance</span> 1. Exchange
@@ -657,7 +617,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                             </select>
                         </label>
 
-                        {/* Variety Selector - SECONDARY (Dynamic) */}
                         <label className="flex flex-col col-span-3">
                             <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
                                 <span className="material-symbols-outlined text-sm">category</span> 2. Variety
@@ -774,7 +733,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
-                      data={marketData} // Fix: Pass FULL data, let Brush handle slicing
+                      data={marketData}
                       margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
                     >
                       <defs>
@@ -815,7 +774,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                         activeDot={{ r: 4, fill: '#fff', stroke: '#0d59f2' }}
                         animationDuration={300}
                       />
-                      {/* Brush Controls the View Window */}
                       <Brush 
                         dataKey="date" 
                         height={30} 
@@ -825,7 +783,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                         startIndex={leftIndex}
                         endIndex={rightIndex}
                         onChange={(e) => {
-                            // Ensure we have valid indices before updating state
                             if (e.startIndex !== undefined && e.endIndex !== undefined) {
                                 setLeftIndex(e.startIndex);
                                 setRightIndex(e.endIndex);
@@ -849,9 +806,9 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                   
                   <div className="w-full flex items-center justify-between border-b border-[#314368] pb-2 mb-4">
                       <h3 className="text-white text-[11px] font-bold uppercase tracking-widest">Live Sentiment</h3>
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${
-                          aiSentiment.bias === 'BULLISH' ? 'bg-[#0bda5e]/20 text-[#0bda5e]' : 
-                          aiSentiment.bias === 'BEARISH' ? 'bg-[#fa6238]/20 text-[#fa6238]' : 
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded border border-transparent ${
+                          aiSentiment.bias === 'BULLISH' ? getTrendColor(100, 'bg') + '/20 ' + getTrendColor(100, 'text') : 
+                          aiSentiment.bias === 'BEARISH' ? getTrendColor(-100, 'bg') + '/20 ' + getTrendColor(-100, 'text') : 
                           'bg-slate-700 text-slate-300'
                       }`}>{aiSentiment.bias}</span>
                   </div>
@@ -863,7 +820,14 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                             <PolarGrid stroke="#314368" />
                             <PolarAngleAxis dataKey="subject" tick={{ fill: '#90a4cb', fontSize: 9, fontWeight: 'bold' }} />
                             <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                            <Radar name="Sentiment" dataKey="A" stroke={aiSentiment.bias === 'BULLISH' ? '#0bda5e' : aiSentiment.bias === 'BEARISH' ? '#fa6238' : '#0d59f2'} strokeWidth={2} fill={aiSentiment.bias === 'BULLISH' ? '#0bda5e' : aiSentiment.bias === 'BEARISH' ? '#fa6238' : '#0d59f2'} fillOpacity={0.3} />
+                            <Radar 
+                                name="Sentiment" 
+                                dataKey="A" 
+                                stroke={getTrendColor(aiSentiment.bias, 'stroke')}
+                                strokeWidth={2} 
+                                fill={getTrendColor(aiSentiment.bias, 'fill')} 
+                                fillOpacity={0.3} 
+                            />
                             <Tooltip contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368', fontSize: '10px' }} />
                         </RadarChart>
                     </ResponsiveContainer>
@@ -874,14 +838,14 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                     <div>
                         <div className="flex justify-between text-[10px] uppercase font-bold text-[#90a4cb] mb-1">
                           <span>Long Sentiment</span>
-                          <span className="text-[#0bda5e]">{aiSentiment.longRatio}%</span>
+                          <span className={getTrendColor(100)}>{aiSentiment.longRatio}%</span>
                         </div>
                         <div className="w-full h-1.5 bg-[#314368] rounded-full overflow-hidden flex">
-                          <div className="bg-[#0bda5e] h-full" style={{ width: `${aiSentiment.longRatio}%` }}></div>
-                          <div className="bg-[#fa6238] h-full" style={{ width: `${aiSentiment.shortRatio}%` }}></div>
+                          <div className={`${getTrendColor(100, 'bg')} h-full`} style={{ width: `${aiSentiment.longRatio}%` }}></div>
+                          <div className={`${getTrendColor(-100, 'bg')} h-full`} style={{ width: `${aiSentiment.shortRatio}%` }}></div>
                         </div>
                         <div className="flex justify-end text-[10px] uppercase font-bold text-[#90a4cb] mt-1">
-                          <span className="text-[#fa6238]">{aiSentiment.shortRatio}% Short</span>
+                          <span className={getTrendColor(-100)}>{aiSentiment.shortRatio}% Short</span>
                         </div>
                     </div>
 
@@ -940,7 +904,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                           [...marketData].reverse().map((row, i) => {
                               const change = ((row.close - row.open) / row.open) * 100;
                               const amplitude = ((row.high - row.low) / row.open) * 100;
-                              const isUp = change >= 0;
                               
                               return (
                                 <tr key={i} className="hover:bg-[#0d59f2]/5 transition-colors cursor-default group">
@@ -949,8 +912,8 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                                   <td className="px-6 py-3 text-[#90a4cb] font-mono">{row.open.toFixed(2)}</td>
                                   <td className="px-6 py-3 text-[#90a4cb] font-mono">{row.high.toFixed(2)}</td>
                                   <td className="px-6 py-3 text-[#90a4cb] font-mono">{row.low.toFixed(2)}</td>
-                                  <td className={`px-6 py-3 font-bold font-mono ${isUp ? 'text-emerald-400' : 'text-rose-400'}`}>{row.close.toFixed(2)}</td>
-                                  <td className={`px-6 py-3 font-mono text-xs ${isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  <td className={`px-6 py-3 font-bold font-mono ${getTrendColor(change)}`}>{row.close.toFixed(2)}</td>
+                                  <td className={`px-6 py-3 font-mono text-xs ${getTrendColor(change)}`}>
                                       {change > 0 ? '+' : ''}{change.toFixed(2)}%
                                   </td>
                                   <td className="px-6 py-3 text-[#90a4cb] font-mono text-xs">{amplitude.toFixed(2)}%</td>

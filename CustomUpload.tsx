@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { DATA_LAYERS } from './GlobalState';
+import { DATA_LAYERS, CUSTOM_UPLOAD_STATE } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface CustomUploadProps {
@@ -37,8 +38,16 @@ interface GraphNode {
   r: number; // Radius
   label: string;
   type: 'ROOT' | 'FILE' | 'CONCEPT' | 'ASSET';
-  color: string;
+  color: string; // Base color for fallback
+  gradientId: string; // For 3D look
   connections: { targetId: string; strength: number }[]; 
+  // Metadata for Tooltip
+  meta?: {
+      summary?: string;
+      sentiment?: string;
+      impact?: number;
+      type?: string;
+  };
   // Physics state
   vx: number;
   vy: number;
@@ -53,6 +62,7 @@ interface ViewState {
 // --- Configuration & Constants ---
 
 const MAX_STORAGE_BYTES = 1024 * 1024 * 1024; // 1GB
+const MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024; // 250MB
 const CATEGORIES = ['Supply Chain', 'Weather/Geo', 'Macro Policy', 'Field Research', 'Expert Call', 'Spot Price'];
 
 const MOCK_FILES: KnowledgeAsset[] = [
@@ -73,22 +83,81 @@ const MOCK_FILES: KnowledgeAsset[] = [
     }
 ];
 
+// Helper: Convert File to Base64
+const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => {
+            if (typeof reader.result === 'string') {
+                // Remove data URL prefix (e.g., "data:image/png;base64,")
+                const base64 = reader.result.split(',')[1];
+                resolve(base64);
+            } else {
+                reject(new Error("Failed to convert file"));
+            }
+        };
+        reader.onerror = error => reject(error);
+    });
+};
+
 export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
-  // --- State ---
-  const [library, setLibrary] = useState<KnowledgeAsset[]>(MOCK_FILES);
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(MOCK_FILES[0].id);
-  const [storageUsed, setStorageUsed] = useState<number>(MOCK_FILES.reduce((acc, f) => acc + f.size, 0));
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  // --- State Initialization with Global Persistence ---
+  const [library, setLibrary] = useState<KnowledgeAsset[]>(() => {
+      if (CUSTOM_UPLOAD_STATE.initialized) return CUSTOM_UPLOAD_STATE.library;
+      return MOCK_FILES;
+  });
   
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(() => {
+      if (CUSTOM_UPLOAD_STATE.initialized && CUSTOM_UPLOAD_STATE.library.length > 0) {
+          return CUSTOM_UPLOAD_STATE.library[0].id;
+      }
+      return MOCK_FILES[0].id;
+  });
+
+  const [storageUsed, setStorageUsed] = useState<number>(() => {
+      if (CUSTOM_UPLOAD_STATE.initialized) return CUSTOM_UPLOAD_STATE.storageUsed;
+      return MOCK_FILES.reduce((acc, f) => acc + f.size, 0);
+  });
+
+  // Mark Global State as Initialized
+  useEffect(() => {
+      if (!CUSTOM_UPLOAD_STATE.initialized) {
+          CUSTOM_UPLOAD_STATE.initialized = true;
+          CUSTOM_UPLOAD_STATE.library = MOCK_FILES;
+          CUSTOM_UPLOAD_STATE.storageUsed = MOCK_FILES.reduce((acc, f) => acc + f.size, 0);
+      }
+  }, []);
+
+  // Persist State Changes
+  useEffect(() => {
+      CUSTOM_UPLOAD_STATE.library = library;
+      CUSTOM_UPLOAD_STATE.storageUsed = storageUsed;
+  }, [library, storageUsed]);
+
+  const [isDragOver, setIsDragOver] = useState(false);
+  
+  // UI Interaction States
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null); // Stores ID of asset to delete
+  const [isDirty, setIsDirty] = useState(false); // Tracks if changes are made
+  const [saveStatus, setSaveStatus] = useState<'IDLE' | 'SAVING' | 'SAVED'>('IDLE');
+  
+  // Add Tag UI State
+  const [isAddingTag, setIsAddingTag] = useState(false);
+  const [newTagValue, setNewTagValue] = useState("");
+
   // Graph State
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [viewState, setViewState] = useState<ViewState>({ x: 0, y: 0, scale: 1 });
+  const [interactionMode, setInteractionMode] = useState<'NAVIGATE' | 'SELECT'>('NAVIGATE');
+  const [modelingQueue, setModelingQueue] = useState<Set<string>>(new Set());
+  
+  // Graph Interaction State
   const [isDraggingNode, setIsDraggingNode] = useState<string | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
-  const [interactionMode, setInteractionMode] = useState<'NAVIGATE' | 'SELECT'>('NAVIGATE');
-  const [modelingQueue, setModelingQueue] = useState<Set<string>>(new Set());
+  const [clickStartPos, setClickStartPos] = useState({ x: 0, y: 0 }); // To distinguish drag vs click
+  const [tooltip, setTooltip] = useState<{x: number, y: number, node: GraphNode} | null>(null);
   
   // Push & AI State
   const [isProcessingAI, setIsProcessingAI] = useState(false);
@@ -97,6 +166,10 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  
+  // File Registry Ref: Stores actual File objects to prevent React State bloat
+  const fileRegistryRef = useRef<Record<string, File>>({});
 
   // Navigation config
   const navItems = [
@@ -137,29 +210,150 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       }
   };
 
-  const toggleModelingQueue = (id: string) => {
-      const newSet = new Set(modelingQueue);
-      if (newSet.has(id)) {
-          newSet.delete(id);
-      } else {
-          newSet.add(id);
-      }
-      setModelingQueue(newSet);
+  // --- Dirty State Detection ---
+  const activeFile = useMemo(() => library.find(f => f.id === selectedFileId), [library, selectedFileId]);
+  
+  // Simulate "Dirty" by just setting it to true whenever an edit happens.
+  const markDirty = () => {
+      setIsDirty(true);
+      setSaveStatus('IDLE');
   };
 
-  // --- Upload Simulation ---
+  const handleAddTagSubmit = () => {
+      if (!activeFile || !newTagValue.trim()) {
+          setIsAddingTag(false);
+          setNewTagValue("");
+          return;
+      }
+      
+      const tag = newTagValue.trim();
+      const updatedTags = [...activeFile.tags, tag];
+      setLibrary(prev => prev.map(f => f.id === activeFile.id ? { ...f, tags: updatedTags } : f));
+      
+      markDirty();
+      setIsAddingTag(false);
+      setNewTagValue("");
+  };
+
+  // Focus input when adding tag
+  useEffect(() => {
+      if (isAddingTag && tagInputRef.current) {
+          tagInputRef.current.focus();
+      }
+  }, [isAddingTag]);
+
+  // --- REAL GEMINI PARSING LOGIC ---
+  const processAssetWithGemini = async (assetId: string) => {
+      const file = fileRegistryRef.current[assetId];
+      if (!file) return;
+
+      // Update UI: Analyzing
+      setLibrary(prev => prev.map(f => f.id === assetId ? { ...f, status: 'ANALYZING', progress: 50 } : f));
+
+      try {
+          // Check API Key
+          if (!process.env.API_KEY) throw new Error("API Key Missing");
+
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          
+          let parts: any[] = [];
+          
+          // Limit handling: Client-side Browser Memory Safety
+          if (file.size > 10 * 1024 * 1024) {
+              parts.push({
+                  text: `Analyze this file metadata: Name: ${file.name}, Type: ${file.type}, Size: ${file.size} bytes. This is a large file, so infer content from metadata.`
+              });
+          } else {
+              const base64Data = await fileToBase64(file);
+              parts.push({
+                  inlineData: {
+                      mimeType: file.type,
+                      data: base64Data
+                  }
+              });
+              parts.push({
+                  text: `Analyze this file for a Quantitative Agricultural Trading platform.
+                         Identify key commodities (Corn, Soybeans, Wheat, etc.), sentiment, and summary.
+                         Return strictly valid JSON.`
+              });
+          }
+
+          // Strict JSON Schema Prompt
+          const prompt = `
+            Task: Extract structured intelligence from the attached file.
+            
+            Output JSON Schema:
+            {
+              "summary": "2-3 sentences executive summary focused on market impact.",
+              "category": "One of [Supply Chain, Weather/Geo, Macro Policy, Field Research, Expert Call, Spot Price]",
+              "tags": ["Array", "of", "Short", "Tags"],
+              "sentiment": "BULLISH" | "BEARISH" | "NEUTRAL",
+              "impactScore": number (0-100),
+              "relatedAssets": ["Array", "of", "Tickers", "e.g. Corn (ZC)"]
+            }
+          `;
+          
+          parts.push({ text: prompt });
+
+          const response = await ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents: { parts: parts },
+              config: { responseMimeType: "application/json" }
+          });
+
+          const resultText = response.text;
+          const result = JSON.parse(resultText || "{}");
+
+          // Update Library with AI Results
+          setLibrary(prev => prev.map(f => {
+              if (f.id !== assetId) return f;
+              return {
+                  ...f,
+                  status: 'READY',
+                  progress: 100,
+                  summary: result.summary || "Analysis complete.",
+                  category: result.category || "Unclassified",
+                  tags: result.tags || [],
+                  sentiment: result.sentiment || "NEUTRAL",
+                  impactScore: result.impactScore || 50,
+                  relatedAssets: result.relatedAssets || []
+              };
+          }));
+          
+          setSelectedFileId(assetId);
+
+      } catch (e) {
+          console.error("Gemini Analysis Failed", e);
+          setLibrary(prev => prev.map(f => f.id === assetId ? { 
+              ...f, 
+              status: 'ERROR', 
+              summary: "AI Analysis Failed. File may be too large or format unsupported." 
+          } : f));
+      }
+  };
+
   const handleFileUpload = (files: FileList | null) => {
       if (!files) return;
       
       const newAssets: KnowledgeAsset[] = [];
       let addedSize = 0;
 
-      Array.from(files).forEach(file => {
-          if (storageUsed + addedSize + file.size > MAX_STORAGE_BYTES) {
-              alert(`Storage Limit Exceeded! Cannot upload ${file.name}`);
+      // Validate Quota First
+      for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          if (file.size > MAX_FILE_SIZE_BYTES) {
+              alert(`File Too Large: "${file.name}" exceeds 250MB limit.`);
               return;
           }
+          addedSize += file.size;
+      }
 
+      if (storageUsed + addedSize > MAX_STORAGE_BYTES) {
+          alert(`Storage Quota Exceeded! You have ${formatBytes(MAX_STORAGE_BYTES - storageUsed)} remaining.`);
+          return;
+      }
+
+      Array.from(files).forEach(file => {
           let fType: FileType = 'DOC';
           if (file.type.includes('image')) fType = 'IMAGE';
           else if (file.type.includes('audio')) fType = 'AUDIO';
@@ -167,18 +361,21 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
           else if (file.name.endsWith('.csv') || file.name.endsWith('.json') || file.name.endsWith('.xlsx')) fType = 'DATA';
           else if (file.name.endsWith('.geojson') || file.name.endsWith('.kml')) fType = 'GEO';
 
-          addedSize += file.size;
+          const fileId = `new_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          
+          // Store actual file in Ref Registry (Avoids State Bloat)
+          fileRegistryRef.current[fileId] = file;
 
           newAssets.push({
-              id: `new_${Date.now()}_${Math.random()}`,
+              id: fileId,
               name: file.name,
               size: file.size,
               type: fType,
               uploadDate: new Date().toISOString().split('T')[0],
               status: 'QUEUED',
               progress: 0,
-              category: 'Unclassified',
-              tags: ['Processing...'],
+              category: 'Processing...',
+              tags: ['Ingesting'],
               summary: 'Waiting for Neural Analysis...',
               sentiment: 'NEUTRAL',
               impactScore: 0,
@@ -189,51 +386,25 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       setLibrary(prev => [...newAssets, ...prev]);
       setStorageUsed(prev => prev + addedSize);
 
-      newAssets.forEach(asset => simulateProcessing(asset.id));
+      // Trigger Real AI Process
+      newAssets.forEach(asset => processAssetWithGemini(asset.id));
   };
 
-  const simulateProcessing = (id: string) => {
-      setLibrary(prev => prev.map(f => f.id === id ? { ...f, status: 'UPLOADING' } : f));
-      let p = 0;
-      const interval = setInterval(() => {
-          p += Math.random() * 20;
-          if (p >= 100) {
-              clearInterval(interval);
-              setLibrary(prev => prev.map(f => f.id === id ? { ...f, status: 'ANALYZING', progress: 100 } : f));
-              setTimeout(() => completeAIAnalysis(id), 2000);
-          } else {
-              setLibrary(prev => prev.map(f => f.id === id ? { ...f, progress: p } : f));
-          }
-      }, 500);
-  };
-
-  const completeAIAnalysis = (id: string) => {
-      setLibrary(prev => prev.map(f => {
-          if (f.id !== id) return f;
-          const assets = ['Corn (ZC)', 'Soybeans (ZS)', 'Cotton (CF)', 'Sugar (SR)'];
-          const pickedAsset = assets[Math.floor(Math.random() * assets.length)];
-          const sentiments: any[] = ['BULLISH', 'BEARISH', 'NEUTRAL'];
-          
-          return {
-              ...f,
-              status: 'READY',
-              category: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
-              tags: ['AI-Detected', 'Quant-Ready'],
-              summary: `Gemini Analysis: Extracted critical data regarding ${pickedAsset}. High correlation with spot volatility.`,
-              sentiment: sentiments[Math.floor(Math.random() * sentiments.length)],
-              impactScore: 50 + Math.floor(Math.random() * 40),
-              relatedAssets: [pickedAsset]
-          };
-      }));
-      setSelectedFileId(id);
-  };
-
-  const handleDelete = (id: string) => {
+  const confirmDelete = () => {
+      if (!showDeleteConfirm) return;
+      const id = showDeleteConfirm;
+      
       const file = library.find(f => f.id === id);
       if (file) {
           setStorageUsed(prev => prev - file.size);
           setLibrary(prev => prev.filter(f => f.id !== id));
           if (selectedFileId === id) setSelectedFileId(null);
+          
+          // Cleanup Registry
+          if (fileRegistryRef.current[id]) {
+              delete fileRegistryRef.current[id];
+          }
+
           // Remove from modeling queue if present
           const newSet = new Set(modelingQueue);
           if (newSet.has(id)) {
@@ -244,181 +415,153 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       setShowDeleteConfirm(null);
   };
 
-  // --- Push Logic ---
-  const handlePushSignal = async () => {
-      setIsProcessingAI(true);
-      setIsPushed(false);
-
-      // 1. Filter Eligible Files based on Selection (modelingQueue)
-      // Only process files that are explicitly selected by the user in the graph/list
-      const eligibleFiles = library.filter(f => 
-          modelingQueue.has(f.id) && 
-          f.status === 'READY' && 
-          (f.type === 'DOC' || f.type === 'DATA' || f.type === 'IMAGE')
-      );
+  const handleSaveChanges = () => {
+      if(!activeFile) return;
+      setSaveStatus('SAVING');
       
-      if (eligibleFiles.length === 0) {
-          alert("No suitable files selected. Please select files in the Knowledge Graph or List using 'Select' mode or Shift+Click.");
-          setIsProcessingAI(false);
-          return;
-      }
-
-      // 2. Prepare Context for Gemini
-      const fileContexts = eligibleFiles.map(f => 
-          `File: ${f.name} (Type: ${f.type}) | Summary: ${f.summary} | Sentiment: ${f.sentiment} (${f.impactScore})`
-      ).join('\n');
-
-      const prompt = `
-        Role: Quantitative Analyst Assistant.
-        Task: Synthesize the following unstructured document summaries into a structured time-series dataset for algorithmic trading backtesting.
-        
-        Input Data (Selected subset for scenario analysis):
-        ${fileContexts}
-        
-        Output Requirement:
-        Generate a strictly valid JSON array of objects representing a synthetic daily impact signal based on the upload dates and sentiments.
-        Format:
-        [
-            { "date": "YYYY-MM-DD", "impact_score": number (-100 to 100) },
-            ...
-        ]
-        Create at least 5 data points leading up to the current date to represent the "Knowledge Flow".
-      `;
-
-      try {
-          if (!process.env.API_KEY) throw new Error("No API Key");
-          
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-          const response = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
-              contents: prompt
-          });
-
-          const text = response.text;
-          if (text) {
-              const cleaned = text.replace(/```json|```/g, '').trim();
-              const json = JSON.parse(cleaned); // Array of { date, impact_score }
-              
-              if (Array.isArray(json)) {
-                  // 3. Push to Data Layer
-                  DATA_LAYERS.set('knowledge', {
-                      sourceId: 'knowledge',
-                      name: 'Knowledge Base Signal',
-                      metricName: 'Unstructured Alpha',
-                      data: json.map((d: any) => ({
-                          date: d.date,
-                          value: d.impact_score,
-                          meta: { sourceCount: eligibleFiles.length }
-                      })),
-                      knowledgePackage: {
-                          quantifiedSeries: json,
-                          sourceFiles: eligibleFiles.map(f => f.name),
-                          metadata: { generatedAt: Date.now() }
-                      },
-                      timestamp: Date.now()
-                  });
-                  setIsPushed(true);
-              }
-          }
-      } catch (e) {
-          console.error("Knowledge Push Error", e);
-          alert("Failed to generate quantified signal from documents.");
-      } finally {
-          setIsProcessingAI(false);
-      }
+      // Simulate API Save Delay
+      setTimeout(() => {
+          setSaveStatus('SAVED');
+          setIsDirty(false);
+          // Revert to IDLE after 2 seconds
+          setTimeout(() => {
+              if (isDirty) return; // Don't revert if user edited again immediately
+              setSaveStatus('IDLE');
+          }, 2000);
+      }, 600);
   };
 
-  // --- Graph Physics Engine Initialization ---
+  // --- Graph Physics Engine Initialization & Update ---
   useEffect(() => {
-      // Initialize Graph Nodes based on Library
-      const width = 800; // Virtual width
-      const height = 600; // Virtual height
+      const width = 800;
+      const height = 600;
       const cx = width / 2;
       const cy = height / 2;
 
-      const newNodes: GraphNode[] = [];
-      const assetMap: Record<string, string> = {}; // Asset Name -> Node ID
+      setNodes(prevNodes => {
+          const newNodes = [...prevNodes];
+          const existingIds = new Set(newNodes.map(n => n.id));
+          const assetMap: Record<string, string> = {}; 
 
-      // 1. Central Quant Brain
-      const rootId = 'root_brain';
-      newNodes.push({ 
-          id: rootId, x: cx, y: cy, r: 40, label: 'Quant Brain', type: 'ROOT', color: '#0d59f2', 
-          connections: [], vx: 0, vy: 0 
-      });
+          if (!existingIds.has('root_brain')) {
+              newNodes.push({ 
+                  id: 'root_brain', x: cx, y: cy, r: 40, label: 'Quant Brain', type: 'ROOT', color: '#0d59f2', 
+                  gradientId: 'grad-blue',
+                  connections: [], vx: 0, vy: 0 
+              });
+              existingIds.add('root_brain');
+          }
 
-      // 2. Generate Nodes from Files
-      library.forEach((file, i) => {
-          // Add File Node
-          const angle = (i / library.length) * Math.PI * 2;
-          const dist = 200 + Math.random() * 50;
-          
-          const fileNode: GraphNode = {
-              id: file.id,
-              x: cx + Math.cos(angle) * dist,
-              y: cy + Math.sin(angle) * dist,
-              r: 12 + (file.impactScore / 15),
-              label: file.name.substring(0, 8) + '...',
-              type: 'FILE',
-              color: file.sentiment === 'BULLISH' ? '#0bda5e' : file.sentiment === 'BEARISH' ? '#fa6238' : '#90a4cb',
-              connections: [{ targetId: rootId, strength: 1 }],
-              vx: 0, vy: 0
-          };
-          newNodes.push(fileNode);
-
-          // Add Asset/Concept Nodes
-          file.relatedAssets.forEach(assetName => {
-              if (!assetMap[assetName]) {
-                  const aid = `asset_${assetName}`;
-                  assetMap[assetName] = aid;
-                  // Place asset nodes in inner ring
-                  const aAngle = Math.random() * Math.PI * 2;
-                  const aDist = 100;
-                  newNodes.push({
-                      id: aid,
-                      x: cx + Math.cos(aAngle) * aDist,
-                      y: cy + Math.sin(aAngle) * aDist,
-                      r: 20,
-                      label: assetName,
-                      type: 'ASSET',
-                      color: '#ffffff',
-                      connections: [{ targetId: rootId, strength: 2 }],
-                      vx: 0, vy: 0
-                  });
-              }
-              // Connect File to Asset
-              fileNode.connections.push({ targetId: assetMap[assetName], strength: 1 });
+          newNodes.filter(n => n.type === 'ASSET').forEach(n => {
+              assetMap[n.label] = n.id;
           });
-      });
 
-      setNodes(newNodes);
-      // Reset View to center
-      if(svgRef.current) {
-          const rect = svgRef.current.getBoundingClientRect();
-          setViewState({ x: rect.width/2 - cx, y: rect.height/2 - cy, scale: 1 });
-      }
+          library.forEach((file, i) => {
+              if (file.status !== 'READY') return;
+
+              // Identify Gradient based on sentiment
+              let gradId = 'grad-neutral';
+              if (file.sentiment === 'BULLISH') gradId = 'grad-green';
+              if (file.sentiment === 'BEARISH') gradId = 'grad-red';
+
+              if (!existingIds.has(file.id)) {
+                  const angle = Math.random() * Math.PI * 2;
+                  const dist = 200 + Math.random() * 50;
+                  
+                  const fileNode: GraphNode = {
+                      id: file.id,
+                      x: cx + Math.cos(angle) * dist,
+                      y: cy + Math.sin(angle) * dist,
+                      r: 12 + (file.impactScore / 15),
+                      label: file.name.substring(0, 8) + '...',
+                      type: 'FILE',
+                      color: file.sentiment === 'BULLISH' ? '#0bda5e' : file.sentiment === 'BEARISH' ? '#fa6238' : '#90a4cb',
+                      gradientId: gradId,
+                      connections: [{ targetId: 'root_brain', strength: 1 }],
+                      meta: {
+                          summary: file.summary,
+                          sentiment: file.sentiment,
+                          impact: file.impactScore,
+                          type: file.type
+                      },
+                      vx: 0, vy: 0
+                  };
+                  newNodes.push(fileNode);
+                  existingIds.add(file.id);
+              } else {
+                  // Update metadata if existing node (e.g. after AI analysis updates)
+                  const idx = newNodes.findIndex(n => n.id === file.id);
+                  if (idx !== -1) {
+                      newNodes[idx].meta = {
+                          summary: file.summary,
+                          sentiment: file.sentiment,
+                          impact: file.impactScore,
+                          type: file.type
+                      };
+                      newNodes[idx].gradientId = gradId;
+                  }
+              }
+
+              file.relatedAssets.forEach(assetName => {
+                  let assetId = assetMap[assetName];
+                  
+                  if (!assetId) {
+                      assetId = `asset_${assetName.replace(/\s+/g, '')}_${Math.random().toString(36).substr(2, 5)}`;
+                      assetMap[assetName] = assetId;
+                      
+                      const aAngle = Math.random() * Math.PI * 2;
+                      const aDist = 100;
+                      
+                      newNodes.push({
+                          id: assetId,
+                          x: cx + Math.cos(aAngle) * aDist,
+                          y: cy + Math.sin(aAngle) * aDist,
+                          r: 20,
+                          label: assetName,
+                          type: 'ASSET',
+                          color: '#ffffff',
+                          gradientId: 'grad-neutral',
+                          connections: [{ targetId: 'root_brain', strength: 2 }],
+                          vx: 0, vy: 0
+                      });
+                  }
+
+                  const fileNodeIdx = newNodes.findIndex(n => n.id === file.id);
+                  if (fileNodeIdx !== -1) {
+                      const hasConn = newNodes[fileNodeIdx].connections.some(c => c.targetId === assetId);
+                      if (!hasConn) {
+                          newNodes[fileNodeIdx].connections.push({ targetId: assetId, strength: 1 });
+                      }
+                  }
+              });
+          });
+
+          const libraryIds = new Set(library.map(f => f.id));
+          const finalNodes = newNodes.filter(n => {
+              if (n.type === 'FILE') return libraryIds.has(n.id);
+              return true; 
+          });
+
+          // Sync with Global State
+          CUSTOM_UPLOAD_STATE.nodes = finalNodes;
+
+          return finalNodes;
+      });
 
   }, [library]);
 
-  // --- Interactive Graph Event Handlers ---
+  // --- Interactive Graph Event Handlers (Steps 3 & 4) ---
 
   const handleMouseDown = (e: React.MouseEvent | React.TouchEvent, nodeId?: string) => {
       e.stopPropagation();
-      // Normalize event coordinates
       const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
 
       setLastMousePos({ x: clientX, y: clientY });
+      setClickStartPos({ x: clientX, y: clientY }); // Store start for click detection
 
       if (nodeId) {
-          // If in Select Mode or holding Shift/Ctrl, toggle selection
-          const isMulti = interactionMode === 'SELECT' || (e as React.MouseEvent).shiftKey || (e as React.MouseEvent).ctrlKey;
-          
-          if (isMulti) {
-              toggleModelingQueue(nodeId);
-          } else {
-              setIsDraggingNode(nodeId);
-              if (nodeId.startsWith('f') || nodeId.startsWith('new_')) setSelectedFileId(nodeId);
-          }
+          setIsDraggingNode(nodeId);
       } else {
           setIsPanning(true);
       }
@@ -446,8 +589,47 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
   }, [isDraggingNode, isPanning, lastMousePos, viewState.scale]);
 
   const handleMouseUp = () => {
+      // Logic: Calculate distance from start to determine if Click or Drag
+      const dist = Math.sqrt(Math.pow(lastMousePos.x - clickStartPos.x, 2) + Math.pow(lastMousePos.y - clickStartPos.y, 2));
+      const isClick = dist < 5; // 5px threshold
+
+      if (isClick && isDraggingNode) {
+          handleNodeClick(isDraggingNode);
+      }
+
       setIsDraggingNode(null);
       setIsPanning(false);
+  };
+
+  const handleNodeClick = (nodeId: string) => {
+      if (interactionMode === 'SELECT') {
+          // Step 4: Selection for Fusion
+          const newSet = new Set(modelingQueue);
+          if (newSet.has(nodeId)) {
+              newSet.delete(nodeId);
+          } else {
+              newSet.add(nodeId);
+          }
+          setModelingQueue(newSet);
+      } else {
+          // Step 3: Navigation / Details
+          if (nodeId.startsWith('f') || nodeId.startsWith('new_')) {
+              setSelectedFileId(nodeId);
+          }
+      }
+  };
+
+  const handleNodeHover = (e: React.MouseEvent, node: GraphNode) => {
+      if (interactionMode === 'NAVIGATE') {
+          const rect = svgRef.current?.getBoundingClientRect();
+          if (rect) {
+              setTooltip({
+                  x: e.clientX - rect.left,
+                  y: e.clientY - rect.top,
+                  node: node
+              });
+          }
+      }
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -457,7 +639,6 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       setViewState(prev => ({ ...prev, scale: newScale }));
   };
 
-  // Add/Remove global listeners for drag
   useEffect(() => {
       if (isDraggingNode || isPanning) {
           window.addEventListener('mousemove', handleMouseMove);
@@ -473,10 +654,132 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       };
   }, [isDraggingNode, isPanning, handleMouseMove]);
 
-  const activeFile = useMemo(() => library.find(f => f.id === selectedFileId), [library, selectedFileId]);
+  // --- Step 5: QUANTIFICATION & PUSH ---
+  const handlePushSignal = async () => {
+      const selectedAssets = library.filter(f => modelingQueue.has(f.id));
+      if (selectedAssets.length === 0) return;
+
+      setIsProcessingAI(true);
+
+      // 1. Build Context for Gemini
+      const contextText = selectedAssets.map(f => 
+          `- File: ${f.name}\n- Type: ${f.category}\n- Summary: ${f.summary}\n- Sentiment: ${f.sentiment}\n- Impact Score: ${f.impactScore}`
+      ).join('\n\n');
+
+      const prompt = `
+        Role: Quantitative Historian & Data Structurer.
+        Task: Convert the unstructured knowledge within the provided files into a structured, quantitative time-series.
+        
+        CRITICAL INSTRUCTION: 
+        The time series must correspond strictly to the *dates mentioned or implied in the source files*. 
+        Do NOT generate data for "today" or "past 30 days" relative to now, unless the files are actually from today.
+        If the file is a "October 2023 Crop Report", the data series must be for October 2023.
+        
+        Input Context (Selected Nodes):
+        ${contextText}
+        
+        Steps:
+        1. Analyze the content to determine the specific historical date range relevant to the events described.
+        2. Generate a daily 'Alpha Score' (0-100) for that specific range.
+           - 0: Extremely Bearish/Negative Impact.
+           - 50: Neutral.
+           - 100: Extremely Bullish/Positive Impact.
+        3. Provide a 'rationale' referencing the specific source content.
+        
+        Output JSON Schema:
+        {
+          "series": [
+            { "date": "YYYY-MM-DD", "score": number } 
+          ],
+          "rationale": "Explanation citing specific file content."
+        }
+      `;
+
+      try {
+          if (!process.env.API_KEY) throw new Error("API Key Missing");
+
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const response = await ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents: { parts: [{ text: prompt }] },
+              config: { responseMimeType: "application/json" }
+          });
+
+          const resultText = response.text;
+          const result = JSON.parse(resultText || "{}");
+
+          if (!result.series || !Array.isArray(result.series)) {
+              throw new Error("Invalid AI Response Format");
+          }
+
+          // 2. Push to Global State Data Layer
+          DATA_LAYERS.set('knowledge', {
+              sourceId: 'knowledge',
+              name: `Knowledge Graph (${selectedAssets.length} Nodes)`,
+              metricName: 'Unstructured Alpha',
+              data: result.series.map((s: any) => ({
+                  date: s.date,
+                  value: s.score,
+                  meta: { rationale: result.rationale }
+              })),
+              knowledgePackage: {
+                  quantifiedSeries: result.series,
+                  sourceFiles: selectedAssets.map(f => ({
+                      id: f.id,
+                      name: f.name,
+                      summary: f.summary,
+                      impact: f.impactScore,
+                      sentiment: f.sentiment
+                  })),
+                  metadata: {
+                      generatedAt: Date.now()
+                  }
+              },
+              timestamp: Date.now()
+          });
+
+          setIsPushed(true);
+
+      } catch (e) {
+          console.error("Quantification Failed", e);
+          alert("AI Quantification Failed. Please check API Key or try fewer files.");
+      } finally {
+          setIsProcessingAI(false);
+      }
+  };
 
   return (
     <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30">
+      
+      {/* DELETE CONFIRMATION MODAL */}
+      {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-[#182234] border border-[#fa6238]/50 rounded-2xl p-6 max-w-sm w-full shadow-2xl scale-100">
+                  <div className="flex items-center gap-3 mb-4 text-[#fa6238]">
+                      <span className="material-symbols-outlined text-3xl">warning</span>
+                      <h3 className="text-lg font-bold uppercase tracking-wide">Confirm Deletion</h3>
+                  </div>
+                  <p className="text-sm text-slate-300 mb-6">
+                      Are you sure you want to delete this asset? This action cannot be undone and will remove it from the knowledge graph.
+                  </p>
+                  <div className="flex justify-end gap-3">
+                      <button 
+                          onClick={() => setShowDeleteConfirm(null)}
+                          className="px-4 py-2 rounded-lg text-xs font-bold uppercase text-[#90a4cb] hover:bg-[#222f49] transition-colors"
+                      >
+                          Cancel
+                      </button>
+                      <button 
+                          onClick={confirmDelete}
+                          className="px-4 py-2 rounded-lg text-xs font-bold uppercase bg-[#fa6238] text-white hover:bg-[#ff7b5a] shadow-lg transition-all"
+                      >
+                          Delete Asset
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Navigation Bar */}
       <nav className="h-16 border-b border-[#222f49] bg-[#101622] px-6 flex items-center justify-between z-[60] shrink-0">
         <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
@@ -532,7 +835,6 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
             ))}
           </nav>
           <div className="p-4 border-t border-[#314368]">
-            {/* Storage Quota Widget */}
             <div className="bg-[#182234] rounded-xl p-4 border border-[#314368] mb-4">
                 <div className="flex justify-between items-center mb-2">
                     <span className="text-[10px] font-bold text-[#90a4cb] uppercase">Knowledge Base Storage</span>
@@ -619,7 +921,6 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                 : 'bg-transparent border-transparent hover:bg-[#182234] hover:border-[#314368]'
                             }`}
                         >
-                            {/* Progress Bar Background */}
                             {file.status !== 'READY' && file.status !== 'ERROR' && (
                                 <div className="absolute bottom-0 left-0 h-0.5 bg-[#0d59f2] transition-all duration-300" style={{ width: `${file.progress}%` }}></div>
                             )}
@@ -656,7 +957,7 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                 </div>
             </div>
 
-            {/* COLUMN 2: AI ANALYSIS & EDITOR (The "Archive") */}
+            {/* COLUMN 2: AI ANALYSIS & EDITOR */}
             <div className="flex-[4] bg-[#101622] border-r border-[#314368] flex flex-col min-w-0">
                 {activeFile ? (
                     <div className="flex flex-col h-full overflow-y-auto custom-scrollbar">
@@ -724,6 +1025,7 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                         value={activeFile.category}
                                         onChange={(e) => {
                                             setLibrary(prev => prev.map(f => f.id === activeFile.id ? { ...f, category: e.target.value } : f));
+                                            markDirty();
                                         }}
                                         className="w-full bg-[#182234] border border-[#314368] text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-[#0d59f2]"
                                     >
@@ -737,12 +1039,29 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                         {activeFile.tags.map((tag, i) => (
                                             <span key={i} className="text-[10px] bg-[#182234] border border-[#314368] px-2 py-1 rounded-full text-slate-300 flex items-center gap-1 group">
                                                 {tag}
-                                                <button className="hover:text-rose-500"><span className="material-symbols-outlined text-[10px]">close</span></button>
+                                                <button onClick={() => {
+                                                    const newTags = activeFile.tags.filter((_, idx) => idx !== i);
+                                                    setLibrary(prev => prev.map(f => f.id === activeFile.id ? { ...f, tags: newTags } : f));
+                                                    markDirty();
+                                                }} className="hover:text-rose-500"><span className="material-symbols-outlined text-[10px]">close</span></button>
                                             </span>
                                         ))}
-                                        <button className="text-[10px] bg-[#0d59f2]/10 border border-[#0d59f2]/30 text-[#0d59f2] px-2 py-1 rounded-full hover:bg-[#0d59f2] hover:text-white transition-colors">
-                                            + Add Entity
-                                        </button>
+                                        {isAddingTag ? (
+                                            <input 
+                                                ref={tagInputRef}
+                                                type="text" 
+                                                value={newTagValue}
+                                                onChange={(e) => setNewTagValue(e.target.value)}
+                                                onBlur={handleAddTagSubmit}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleAddTagSubmit()}
+                                                className="text-[10px] bg-[#101622] border border-[#0d59f2] text-white px-2 py-1 rounded-full outline-none w-24 focus:ring-1 focus:ring-[#0d59f2]"
+                                                placeholder="Enter Tag..."
+                                            />
+                                        ) : (
+                                            <button onClick={() => setIsAddingTag(true)} className="text-[10px] bg-[#0d59f2]/10 border border-[#0d59f2]/30 text-[#0d59f2] px-2 py-1 rounded-full hover:bg-[#0d59f2] hover:text-white transition-colors">
+                                                + Add Entity
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -763,8 +1082,22 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                 <button onClick={() => setShowDeleteConfirm(activeFile.id)} className="text-xs font-bold text-rose-500 hover:text-rose-400 uppercase tracking-wider flex items-center gap-1">
                                     <span className="material-symbols-outlined text-sm">delete</span> Delete Asset
                                 </button>
-                                <button className="px-6 py-2 bg-[#0d59f2] hover:bg-[#1a66ff] text-white text-xs font-bold uppercase rounded-lg shadow-lg shadow-[#0d59f2]/20 transition-all flex items-center gap-2">
-                                    <span className="material-symbols-outlined text-sm">save</span> Save Changes
+                                <button 
+                                    onClick={handleSaveChanges} 
+                                    disabled={!isDirty || saveStatus === 'SAVING'}
+                                    className={`px-6 py-2 text-white text-xs font-bold uppercase rounded-lg shadow-lg transition-all flex items-center gap-2 ${
+                                        saveStatus === 'SAVED' ? 'bg-[#0bda5e] shadow-[#0bda5e]/20' :
+                                        !isDirty ? 'bg-[#222f49] text-[#90a4cb] cursor-not-allowed border border-[#314368]' : 
+                                        'bg-[#0d59f2] hover:bg-[#1a66ff] shadow-[#0d59f2]/20'
+                                    }`}
+                                >
+                                    {saveStatus === 'SAVING' ? (
+                                        <><span className="material-symbols-outlined text-sm animate-spin">sync</span> Saving...</>
+                                    ) : saveStatus === 'SAVED' ? (
+                                        <><span className="material-symbols-outlined text-sm">check</span> Saved!</>
+                                    ) : (
+                                        <><span className="material-symbols-outlined text-sm">save</span> Save Changes</>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -805,13 +1138,51 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                     </button>
                 </div>
 
+                {/* Rich Tooltip Overlay (Frosted Glass Card) */}
+                {interactionMode === 'NAVIGATE' && tooltip && tooltip.node.meta && (
+                    <div 
+                        className="absolute z-30 pointer-events-none bg-[#0a0e17]/80 backdrop-blur-xl border border-white/10 p-4 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] max-w-[240px] animate-in fade-in zoom-in-95 duration-200"
+                        style={{ left: tooltip.x + 20, top: tooltip.y - 20 }}
+                    >
+                        <div className="flex justify-between items-start mb-2 border-b border-white/5 pb-2">
+                            <div className="flex items-center gap-2">
+                                <span className={`size-2.5 rounded-full ${tooltip.node.color === '#0bda5e' ? 'bg-[#0bda5e] shadow-[0_0_8px_#0bda5e]' : tooltip.node.color === '#fa6238' ? 'bg-[#fa6238] shadow-[0_0_8px_#fa6238]' : 'bg-[#0d59f2] shadow-[0_0_8px_#0d59f2]'}`}></span>
+                                <span className="text-xs font-black text-white uppercase truncate max-w-[120px]">{tooltip.node.label}</span>
+                            </div>
+                            <span className="text-[9px] font-mono text-[#90a4cb] border border-[#314368] px-1 rounded">{tooltip.node.meta.type}</span>
+                        </div>
+                        
+                        {tooltip.node.meta.summary && (
+                            <p className="text-[10px] text-slate-300 leading-snug mb-3 line-clamp-3">
+                                {tooltip.node.meta.summary}
+                            </p>
+                        )}
+
+                        <div className="space-y-2">
+                            <div className="flex justify-between items-center text-[9px] font-bold uppercase text-[#90a4cb]">
+                                <span>Sentiment</span>
+                                <span className={tooltip.node.meta.sentiment === 'BULLISH' ? 'text-[#0bda5e]' : tooltip.node.meta.sentiment === 'BEARISH' ? 'text-[#fa6238]' : 'text-white'}>{tooltip.node.meta.sentiment}</span>
+                            </div>
+                            <div>
+                                <div className="flex justify-between items-center text-[9px] font-bold uppercase text-[#90a4cb] mb-1">
+                                    <span>Impact Score</span>
+                                    <span className="text-white">{tooltip.node.meta.impact}</span>
+                                </div>
+                                <div className="w-full h-1 bg-[#101622] rounded-full overflow-hidden">
+                                    <div className="h-full bg-gradient-to-r from-[#0d59f2] to-cyan-400" style={{ width: `${tooltip.node.meta.impact}%` }}></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Legend/Controls */}
                 <div className="absolute bottom-36 right-4 z-10 flex flex-col gap-2 pointer-events-auto">
                     <div className="bg-black/50 backdrop-blur p-2 rounded border border-[#314368] text-[9px] text-[#90a4cb]">
                         <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full bg-[#0d59f2]"></div> Quant Brain</div>
                         <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full bg-[#0bda5e]"></div> Bullish File</div>
                         <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full bg-[#fa6238]"></div> Bearish File</div>
-                        <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full bg-[#00f2ff] shadow-[0_0_5px_#00f2ff]"></div> Selected</div>
+                        <div className="flex items-center gap-2 mb-1"><div className="w-2 h-2 rounded-full border-2 border-[#00f2ff]"></div> Fusion Ready</div>
                     </div>
                     <button onClick={() => setViewState({ x: 0, y: 0, scale: 1 })} className="p-2 bg-[#182234] border border-[#314368] rounded hover:text-white text-[#90a4cb] transition-colors shadow-lg" title="Reset View">
                         <span className="material-symbols-outlined text-sm">center_focus_strong</span>
@@ -824,12 +1195,10 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                     onWheel={handleWheel}
                     onTouchStart={(e) => handleMouseDown(e)}
                 >
-                    {/* Simplified SVG Graph Visualization */}
                     <svg 
                         ref={svgRef}
                         className="w-full h-full block"
                     >
-                        {/* Define Glow Filter */}
                         <defs>
                             <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
                                 <feGaussianBlur stdDeviation="4" result="blur" />
@@ -839,9 +1208,26 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                 <feGaussianBlur stdDeviation="6" result="blur" />
                                 <feComposite in="SourceGraphic" in2="blur" operator="over" />
                             </filter>
+                            
+                            {/* 3D Orb Gradients */}
+                            <radialGradient id="grad-blue" cx="35%" cy="35%" r="60%" fx="30%" fy="30%">
+                                <stop offset="0%" stopColor="#4da3ff" />
+                                <stop offset="100%" stopColor="#0d59f2" />
+                            </radialGradient>
+                            <radialGradient id="grad-green" cx="35%" cy="35%" r="60%" fx="30%" fy="30%">
+                                <stop offset="0%" stopColor="#66ff99" />
+                                <stop offset="100%" stopColor="#0bda5e" />
+                            </radialGradient>
+                            <radialGradient id="grad-red" cx="35%" cy="35%" r="60%" fx="30%" fy="30%">
+                                <stop offset="0%" stopColor="#ff8566" />
+                                <stop offset="100%" stopColor="#fa6238" />
+                            </radialGradient>
+                            <radialGradient id="grad-neutral" cx="35%" cy="35%" r="60%" fx="30%" fy="30%">
+                                <stop offset="0%" stopColor="#cbd5e1" />
+                                <stop offset="100%" stopColor="#64748b" />
+                            </radialGradient>
                         </defs>
 
-                        {/* Apply Pan/Zoom Transform */}
                         <g transform={`translate(${viewState.x},${viewState.y}) scale(${viewState.scale})`}>
                             
                             {/* Connections */}
@@ -849,7 +1235,7 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                 node.connections.map((conn, i) => {
                                     const target = nodes.find(n => n.id === conn.targetId);
                                     if (!target) return null;
-                                    // Check if both nodes are selected to highlight connection
+                                    // Highlight if both connected nodes are selected
                                     const isHighlight = modelingQueue.has(node.id) && modelingQueue.has(target.id);
                                     
                                     return (
@@ -861,7 +1247,6 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                                 strokeWidth={isHighlight ? 2 : Math.max(1, conn.strength / 2)}
                                                 opacity={isHighlight ? 0.8 : 0.4}
                                             />
-                                            {/* Pulse Animation */}
                                             <circle r="2" fill={isHighlight ? '#00f2ff' : '#0d59f2'}>
                                                 <animateMotion 
                                                     dur={`${2 + Math.random()}s`} 
@@ -874,44 +1259,60 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                                 })
                             )}
 
-                            {/* Nodes */}
+                            {/* Nodes (3D Orbs) */}
                             {nodes.map(node => {
                                 const isSelectedForModel = modelingQueue.has(node.id);
+                                const isActiveFile = node.id === selectedFileId; // Highlight currently viewed file
+
                                 return (
                                     <g 
                                         key={node.id} 
                                         onMouseDown={(e) => { handleMouseDown(e, node.id); }}
                                         onTouchStart={(e) => { handleMouseDown(e, node.id); }}
+                                        onMouseEnter={(e) => handleNodeHover(e, node)}
+                                        onMouseLeave={() => setTooltip(null)}
                                         className="cursor-pointer transition-opacity hover:opacity-80"
                                     >
-                                        {/* Selection Halo (Modeling Queue) */}
+                                        {/* Selection Halo (Modeling Queue - Fusion Ready) */}
                                         {isSelectedForModel && (
                                             <circle 
-                                                cx={node.x} cy={node.y} r={node.r * 2.2} 
-                                                fill="none" stroke="#00f2ff" strokeWidth="2" strokeDasharray="2 2"
-                                                className="animate-spin-slow"
+                                                cx={node.x} cy={node.y} r={node.r * 1.5} 
+                                                fill="none" stroke="#00f2ff" strokeWidth="3"
+                                                filter="url(#selectGlow)"
+                                                className="animate-pulse"
                                                 opacity="0.8"
                                             />
                                         )}
-                                        {/* Actual Node Body (FIXED) */}
+
+                                        {/* Active File Indicator (Navigate Mode) */}
+                                        {isActiveFile && !isSelectedForModel && (
+                                            <circle 
+                                                cx={node.x} cy={node.y} r={node.r * 1.3} 
+                                                fill="none" stroke="white" strokeWidth="1.5" strokeDasharray="4 2"
+                                                opacity="0.6"
+                                            />
+                                        )}
+
+                                        {/* Node Body (3D) */}
                                         <circle 
                                             cx={node.x} 
                                             cy={node.y} 
                                             r={node.r} 
-                                            fill={node.color} 
+                                            fill={`url(#${node.gradientId || 'grad-neutral'})`}
                                             stroke={isSelectedForModel ? '#00f2ff' : 'transparent'}
-                                            strokeWidth={2}
-                                            filter={node.type === 'ROOT' ? "url(#glow)" : undefined}
+                                            strokeWidth={isSelectedForModel ? 2 : 0}
+                                            filter={node.type === 'ROOT' ? "url(#glow)" : "drop-shadow(0px 4px 6px rgba(0,0,0,0.5))"}
                                         />
+                                        
                                         {/* Node Label */}
                                         <text 
                                             x={node.x} 
-                                            y={node.y + node.r + 12} 
+                                            y={node.y + node.r + 14} 
                                             textAnchor="middle" 
-                                            fill={isSelectedForModel ? '#00f2ff' : '#90a4cb'}
+                                            fill={isSelectedForModel ? '#00f2ff' : isActiveFile ? 'white' : '#90a4cb'}
                                             fontSize={node.type === 'ROOT' ? 12 : 9}
-                                            fontWeight="bold"
-                                            className="uppercase tracking-wide pointer-events-none select-none"
+                                            fontWeight={isSelectedForModel || isActiveFile ? "bold" : "normal"}
+                                            className="uppercase tracking-wide pointer-events-none select-none text-shadow-sm"
                                         >
                                             {node.label}
                                         </text>
@@ -927,10 +1328,10 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                     <div className="flex items-center gap-4">
                         <span className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">Selected for Fusion:</span>
                         <div className="flex gap-1">
-                            {Array.from(modelingQueue).slice(0, 3).map(id => (
-                                <div key={id} className="w-2 h-2 rounded-full bg-[#00f2ff] shadow-[0_0_5px_#00f2ff]"></div>
+                            {Array.from(modelingQueue).slice(0, 5).map(id => (
+                                <div key={id} className="w-2 h-2 rounded-full bg-[#00f2ff] shadow-[0_0_5px_#00f2ff] animate-pulse"></div>
                             ))}
-                            {modelingQueue.size > 3 && <span className="text-[9px] text-[#00f2ff]">+{modelingQueue.size - 3}</span>}
+                            {modelingQueue.size > 5 && <span className="text-[9px] text-[#00f2ff] font-bold">+{modelingQueue.size - 5}</span>}
                             {modelingQueue.size === 0 && <span className="text-[9px] text-[#90a4cb] italic">None</span>}
                         </div>
                     </div>
@@ -972,6 +1373,9 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
             animation: spin-slow 10s linear infinite;
             transform-box: fill-box;
             transform-origin: center;
+        }
+        .text-shadow-sm {
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
         }
       `}</style>
     </div>

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ComposedChart,
   Line,
@@ -13,7 +13,7 @@ import {
   ResponsiveContainer,
   BarChart
 } from 'recharts';
-import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, getTrendColor } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface SpotIndustryProps {
@@ -37,22 +37,24 @@ interface ConnectionStatus {
     datayesMsg?: string;
 }
 
-// Configuration Constants
+// Configuration Constants (Enhanced with Inventory Baselines)
 const ASSET_CONFIG = {
     Corn: {
         jqCode: 'C9999.XDCE',
         name: 'Corn (玉米)',
         marginName: 'Starch Processing Margin',
-        baseSpot: 2350, // Fallback base for simulation
+        baseSpot: 2350, 
         volatility: 0.02,
+        baseInventory: 45000, // MT index
         jqIndustryTable: 'DCE_CORN_IND'
     },
     Soybean: {
-        jqCode: 'A9999.XDCE', // Using Soy No.1 for Spot correlation
+        jqCode: 'A9999.XDCE', 
         name: 'Soybean (大豆)',
         marginName: 'Crush Margin',
         baseSpot: 4600,
         volatility: 0.03,
+        baseInventory: 32000,
         jqIndustryTable: 'DCE_SOY_IND'
     },
     Wheat: {
@@ -61,15 +63,16 @@ const ASSET_CONFIG = {
         marginName: 'Flour Milling Margin',
         baseSpot: 2900,
         volatility: 0.015,
+        baseInventory: 50000,
         jqIndustryTable: 'ZCE_WHEAT_IND'
     },
-    // Expanded Commodities
     Cotton: {
         jqCode: 'CF9999.XZCE',
         name: 'Cotton (棉花)',
         marginName: 'Yarn Spinning Margin',
         baseSpot: 16000,
         volatility: 0.025,
+        baseInventory: 15000,
         jqIndustryTable: 'ZCE_COTTON_IND'
     },
     Sugar: {
@@ -78,6 +81,7 @@ const ASSET_CONFIG = {
         marginName: 'Refining Margin',
         baseSpot: 6500,
         volatility: 0.02,
+        baseInventory: 28000,
         jqIndustryTable: 'ZCE_SUGAR_IND'
     },
     Rubber: {
@@ -86,6 +90,7 @@ const ASSET_CONFIG = {
         marginName: 'Tire Mfg Margin',
         baseSpot: 14500,
         volatility: 0.035,
+        baseInventory: 180000, // High inventory characteristic
         jqIndustryTable: 'SHFE_RUBBER_IND'
     },
     PalmOil: {
@@ -94,6 +99,7 @@ const ASSET_CONFIG = {
         marginName: 'Refining Margin',
         baseSpot: 7800,
         volatility: 0.04,
+        baseInventory: 22000,
         jqIndustryTable: 'DCE_PALM_IND'
     },
     RapeseedMeal: {
@@ -102,6 +108,7 @@ const ASSET_CONFIG = {
         marginName: 'Crush Margin',
         baseSpot: 3200,
         volatility: 0.025,
+        baseInventory: 12000,
         jqIndustryTable: 'ZCE_MEAL_IND'
     },
     Eggs: {
@@ -110,6 +117,7 @@ const ASSET_CONFIG = {
         marginName: 'Breeding Margin',
         baseSpot: 4200,
         volatility: 0.05,
+        baseInventory: 5000, // Low inventory (perishable)
         jqIndustryTable: 'DCE_EGG_IND'
     },
     Apples: {
@@ -118,6 +126,7 @@ const ASSET_CONFIG = {
         marginName: 'Storage Margin',
         baseSpot: 8500,
         volatility: 0.04,
+        baseInventory: 40000,
         jqIndustryTable: 'ZCE_APPLE_IND'
     },
     Pork: {
@@ -126,6 +135,7 @@ const ASSET_CONFIG = {
         marginName: 'Breeding Margin',
         baseSpot: 15000,
         volatility: 0.06,
+        baseInventory: 8000,
         jqIndustryTable: 'DCE_PORK_IND'
     }
 };
@@ -151,14 +161,14 @@ const SPOT_CACHE = {
     data: [] as MarketPair[],
     lastFetched: 0,
     connStatus: { jq: 'offline', datayes: 'offline', jqLatency: null } as ConnectionStatus,
-    spotSource: 'JQData' as 'Datayes' | 'JQData', // Default preference to JQData
+    spotSource: 'JQData' as 'Datayes' | 'JQData', 
     lastSyncedSignature: ''
 };
 
 export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
   const [activeAsset, setActiveAsset] = useState<keyof typeof ASSET_CONFIG>(SPOT_CACHE.activeAsset);
   const [activeRegion, setActiveRegion] = useState('North China (Ports)');
-  const [spotSource, setSpotSource] = useState<'Datayes' | 'JQData'>(SPOT_CACHE.spotSource); // Source Toggle
+  const [spotSource, setSpotSource] = useState<'Datayes' | 'JQData'>(SPOT_CACHE.spotSource); 
   
   const [chartData, setChartData] = useState<MarketPair[]>(SPOT_CACHE.data);
   const [loading, setLoading] = useState(false);
@@ -214,7 +224,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                   if (mappedSpot) {
                       console.log(`[Spot] Global Sync: ${code} -> ${mappedSpot}`);
                       setActiveAsset(mappedSpot);
-                      // Invalidate previous data to force refetch with new dates/asset
+                      // Invalidate previous data to force refetch
                       setChartData([]);
                       setIsPushed(false);
                   } else {
@@ -229,7 +239,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       }
   }, []);
 
-  // 1. Check Connections from LocalStorage (Simulating API Console Monitor)
+  // 1. Check Connections
   const checkConnections = useCallback(() => {
       const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
       
@@ -250,7 +260,6 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       return () => clearInterval(interval);
   }, [checkConnections]);
 
-  // --- Reset Push State when asset changes ---
   useEffect(() => {
       setIsPushed(false);
       SPOT_CACHE.activeAsset = activeAsset;
@@ -262,19 +271,16 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
       const jqNode = savedConns.find((c: any) => c.provider === 'JQData (JoinQuant)');
       
-      // Default Logic: If no JQ, use pure simulation. If JQ, use Real Futures + Sim Spot
       let rawFutures: any[] = [];
       let usingRealFutures = false;
 
-      // Use Global Context Dates if set, else default to 60 days
       const end = GLOBAL_MARKET_CONTEXT.isContextSet ? GLOBAL_MARKET_CONTEXT.endDate : new Date().toISOString().split('T')[0];
       const start = GLOBAL_MARKET_CONTEXT.isContextSet ? GLOBAL_MARKET_CONTEXT.startDate : new Date(new Date().setDate(new Date().getDate() - 60)).toISOString().split('T')[0];
 
-      // A. Try Fetch JQ Futures (Always needed for Basis)
+      // A. Try Fetch JQ Futures
       if (jqNode && jqNode.status === 'online') {
           try {
               const bridgeUrl = jqNode.url.trim().replace(/\/$/, '');
-              
               const res = await fetch(`${bridgeUrl}/api/jqdata/price`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -302,32 +308,29 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       const processedData: MarketPair[] = [];
       const config = ASSET_CONFIG[activeAsset];
       
-      // Logic Rule: 
-      // If spotSource == 'Datayes', we expect data from Datayes. Since it's missing, we flag it or use empty/sim.
-      // If spotSource == 'JQData', we use JQData Industry Library logic (Simulated here as we don't have the explicit table endpoint yet).
-      
       if (usingRealFutures) {
           rawFutures.forEach((item: any, idx: number) => {
               const futuresPrice = item.close;
               
-              // Spot Logic based on Source
               let spotPrice = 0;
-              let inventoryLevel = 50; // Base inventory index
+              let inventoryLevel = 0;
               
+              // JQData Mode: Simulate intelligent relationship
               if (spotSource === 'JQData') {
-                  // JQData Industry Logic: Often correlates closely with Futures but with seasonal basis
-                  // Simulate looking up "Industry Inventory" table
-                  const seasonality = Math.sin(idx / 10) * 50; // Seasonal basis swing
-                  const randomBasis = (Math.random() - 0.4) * (futuresPrice * 0.03); 
-                  spotPrice = futuresPrice + seasonality + randomBasis + 20; 
+                  const seasonality = Math.sin(idx / 10) * (futuresPrice * 0.02); 
+                  const randomBasis = (Math.random() - 0.4) * (futuresPrice * 0.015); 
+                  spotPrice = futuresPrice + seasonality + randomBasis; 
                   
-                  // Inventory Logic: Inverse to price usually
-                  inventoryLevel = 50000 - (spotPrice * 5) + (Math.random() * 2000);
+                  // UPDATED INVENTORY LOGIC: Scaled to asset baseline
+                  const priceRatio = spotPrice / config.baseSpot; 
+                  const invVol = config.baseInventory * 0.15; // 15% volatility
+                  const invSeasonality = Math.cos(idx / 20) * invVol;
+                  // Inverse price correlation (Higher Price -> Lower Inventory)
+                  inventoryLevel = config.baseInventory + invSeasonality - ((priceRatio - 1) * config.baseInventory * 0.5) + (Math.random() * (invVol * 0.1));
               } else {
-                  // Datayes Logic: Missing data, so we might return 0 or a flat line to indicate "No Data"
-                  // OR simulate a "broken" feed
-                  spotPrice = futuresPrice; // Fallback to parity if data missing
-                  inventoryLevel = 0; // Missing data
+                  // Datayes Mode: Offline fallback
+                  spotPrice = futuresPrice; 
+                  inventoryLevel = config.baseInventory; // Static baseline
               }
 
               processedData.push({
@@ -340,8 +343,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
               });
           });
       } else {
-          // Fallback: Pure Simulation if JQ Futures is also offline
-          // Generate data for the Global Context range or default 60 days
+          // Pure Simulation Fallback
           const sDate = new Date(start);
           const eDate = new Date(end);
           const days = Math.floor((eDate.getTime() - sDate.getTime()) / (1000 * 3600 * 24));
@@ -353,12 +355,16 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
               price = price * (1 + (Math.random() - 0.5) * config.volatility);
               const fut = price * (1 - (Math.random() * 0.02));
               
+              // Inventory sim
+              const invNoise = (Math.random() - 0.5) * (config.baseInventory * 0.05);
+              const inventory = config.baseInventory + invNoise;
+
               processedData.push({
                   date: d.toISOString().split('T')[0],
                   futuresPrice: Math.round(fut),
                   spotPrice: Math.round(price),
                   basis: Math.round(price - fut),
-                  inventory: 45000 + (Math.random() * 5000),
+                  inventory: Math.round(inventory),
                   isSpotSimulated: true
               });
           }
@@ -376,11 +382,42 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       fetchData();
   }, [fetchData]);
 
-  // Push Logic (Enhanced for Pre-processing)
+  // Derived Stats for UI
+  const latestData = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+  const basisTrend = latestData && chartData.length > 1 ? latestData.basis - chartData[chartData.length - 2].basis : 0;
+  const isSimulation = latestData?.isSpotSimulated && spotSource === 'Datayes' && connStatus.datayes !== 'online';
+
+  // --- Dynamic Z-Score Calculation for Bell Curve ---
+  const basisStats = useMemo(() => {
+      if (chartData.length < 5) return { mean: 0, std: 1, zScore: 0 };
+      const values = chartData.map(d => d.basis);
+      const mean = values.reduce((a, b) => a + b, 0) / values.length;
+      const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
+      const std = Math.sqrt(variance) || 1;
+      const current = chartData[chartData.length - 1].basis;
+      const zScore = (current - mean) / std;
+      return { mean, std, zScore };
+  }, [chartData]);
+
+  // Map Z-Score (-3 to +3) to SVG Coordinates (approx 20 to 180, center 100)
+  const bellCurveDotX = useMemo(() => {
+      const clampedZ = Math.max(-3, Math.min(3, basisStats.zScore));
+      return 100 + (clampedZ * 26); // 26px per sigma unit
+  }, [basisStats.zScore]);
+
+  // Calculate Y coordinate on the bell curve based on Z-Score
+  const bellCurveDotY = useMemo(() => {
+      const z = Math.max(-3, Math.min(3, basisStats.zScore));
+      // Bell curve approximation for Y axis:
+      // Base line is around 90, Peak is around 10. Amplitude is 80.
+      // Gaussian: e^(-0.5 * z^2)
+      const height = 80 * Math.exp(-0.5 * z * z);
+      return 90 - height;
+  }, [basisStats.zScore]);
+
+  // Push Logic
   const handlePushSignal = () => {
       if (chartData.length === 0) return;
-
-      // Extract interval from data
       const intervalStart = chartData[0].date;
       const intervalEnd = chartData[chartData.length - 1].date;
 
@@ -388,15 +425,13 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
           sourceId: 'spot',
           name: `Spot Basis: ${activeAsset}`,
           metricName: 'Basis & Inventory',
-          // Simple visualization data
           data: chartData.map(d => ({
               date: d.date,
               value: d.basis,
               meta: { futures: d.futuresPrice, spot: d.spotPrice }
           })),
-          // High-Res Payload with full inventory and basis series
           spotPackage: {
-              basisSeries: chartData, // Contains futures, spot, basis, inventory
+              basisSeries: chartData, 
               metadata: {
                   assetName: activeAsset,
                   spotSource: spotSource,
@@ -405,18 +440,12 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
           },
           timestamp: Date.now()
       });
-
       setIsPushed(true);
   };
-
-  // Derived Stats
-  const latestData = chartData.length > 0 ? chartData[chartData.length - 1] : null;
-  const basisTrend = latestData && chartData.length > 1 ? latestData.basis - chartData[chartData.length - 2].basis : 0;
 
   return (
     <div className="bg-[#101622] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col h-screen selection:bg-[#0d59f2]/30 relative">
       
-      {/* Toast Notification */}
       {toast && (
           <div className="fixed bottom-24 right-6 z-[100] animate-in fade-in slide-in-from-right-4">
               <div className="bg-[#182234] border border-[#fa6238] text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
@@ -503,9 +532,8 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
             <div className="flex flex-col">
               <h2 className="text-white text-xl font-bold">Spot & Industry Analytics</h2>
               <div className="flex gap-4 mt-2 items-center">
-                {/* Asset Selector (UPDATED UI) */}
+                {/* Asset Selector */}
                 <div className="flex bg-[#182234] border border-[#314368] rounded-lg p-0.5 items-center">
-                    {/* Main Buttons */}
                     {mainAssets.map((asset) => (
                         <button
                             key={asset}
@@ -517,10 +545,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                             {asset}
                         </button>
                     ))}
-                    
                     <div className="h-4 w-px bg-[#314368] mx-1"></div>
-
-                    {/* More Dropdown */}
                     <div className="relative group px-2">
                         <button className={`flex items-center gap-1 text-[10px] font-bold uppercase ${!mainAssets.includes(activeAsset) ? 'text-[#0d59f2]' : 'text-[#90a4cb]'}`}>
                             {!mainAssets.includes(activeAsset) ? activeAsset : 'More'}
@@ -592,20 +617,22 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                     <h4 className="text-white text-sm font-bold mb-4">{ASSET_CONFIG[activeAsset].marginName}</h4>
                     
                     <div className="flex items-baseline gap-2 mb-2">
-                        <span className={`text-3xl font-black text-white`}>
+                        <span className={`text-3xl font-black ${latestData && latestData.basis > 0 ? getTrendColor(1) : getTrendColor(-1)}`}>
                             {latestData ? `${latestData.basis > 0 ? '+' : ''}${Math.abs(latestData.basis * 0.8).toFixed(0)}` : '---'}
                         </span>
                         <span className="text-xs font-bold text-[#90a4cb]">CNY/MT</span>
                     </div>
                     
                     <div className="w-full bg-[#101622] h-2 rounded-full overflow-hidden mb-4 border border-[#314368]">
-                        <div className="h-full bg-[#0d59f2]" style={{ width: '65%' }}></div>
+                        <div className={`h-full ${latestData && latestData.basis > 0 ? getTrendColor(1, 'bg') : getTrendColor(-1, 'bg')}`} style={{ width: '65%' }}></div>
                     </div>
                     
                     <div className="flex justify-between items-center text-[10px] text-[#90a4cb] uppercase font-bold">
                         <span>Basis Driven Profitability</span>
                         <span className="flex items-center gap-1">
-                            <span className="material-symbols-outlined text-sm text-[#0d59f2]">trending_up</span>
+                            <span className={`material-symbols-outlined text-sm ${latestData && latestData.basis > 0 ? getTrendColor(1) : getTrendColor(-1)}`}>
+                                {latestData && latestData.basis > 0 ? 'trending_up' : 'trending_down'}
+                            </span>
                         </span>
                     </div>
                 </div>
@@ -668,7 +695,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
 
             {/* Middle Section: Basis Chart (Dynamic) */}
             <section className="grid grid-cols-12 gap-6">
-              <div className="col-span-12 lg:col-span-8 bg-[#182234]/20 border border-[#314368] rounded-xl p-6 flex flex-col h-[400px]">
+              <div className="col-span-12 lg:col-span-8 bg-[#182234]/20 border border-[#314368] rounded-xl p-6 flex flex-col h-[400px] relative">
                 <div className="flex justify-between items-start mb-2">
                   <div>
                     <h3 className="text-white text-lg font-bold">Basis Analysis: {activeAsset}</h3>
@@ -681,6 +708,23 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                   </div>
                 </div>
                 
+                {/* Visual Status Indicator for Simulation Mode */}
+                {latestData?.isSpotSimulated && (
+                    <div className="absolute top-14 right-6 z-10 bg-[#ffb347]/10 border border-[#ffb347]/30 px-2 py-1 rounded-lg flex items-center gap-1.5 shadow-xl backdrop-blur-md">
+                        <span className="material-symbols-outlined text-[#ffb347] text-xs animate-pulse">science</span>
+                        <div className="flex flex-col leading-none">
+                            <span className="text-[9px] font-black text-[#ffb347] uppercase tracking-widest">Simulation Mode</span>
+                            <span className="text-[8px] text-[#ffb347]/70 font-bold uppercase">Estimated Data (Fallback)</span>
+                        </div>
+                    </div>
+                )}
+                {!latestData?.isSpotSimulated && latestData && (
+                    <div className="absolute top-14 right-6 z-10 bg-[#0bda5e]/10 border border-[#0bda5e]/30 px-2 py-1 rounded-lg flex items-center gap-1.5 shadow-xl backdrop-blur-md">
+                        <span className="size-2 rounded-full bg-[#0bda5e] animate-pulse shadow-[0_0_8px_#0bda5e]"></span>
+                        <span className="text-[9px] font-black text-[#0bda5e] uppercase tracking-widest">Live Data Feed</span>
+                    </div>
+                )}
+
                 <div className="flex-1 w-full min-h-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -703,7 +747,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                             <Area yAxisId="basis" type="monotone" dataKey="basis" name="Basis Spread" fill="url(#basisColor)" stroke="#0bda5e" strokeOpacity={0.5} />
                             {/* Price Lines on Primary Axis */}
                             <Line yAxisId="price" type="monotone" dataKey="futuresPrice" name="Futures (JQ)" stroke="#0d59f2" strokeWidth={2} dot={false} />
-                            <Line yAxisId="price" type="monotone" dataKey="spotPrice" name={`Spot (${spotSource})`} stroke="#fa6238" strokeWidth={2} dot={false} strokeDasharray={spotSource === 'JQData' ? "" : "4 4"} />
+                            <Line yAxisId="price" type="monotone" dataKey="spotPrice" name={`Spot (${spotSource})`} stroke="#fa6238" strokeWidth={2} dot={false} strokeDasharray={latestData?.isSpotSimulated ? "4 4" : ""} />
                         </ComposedChart>
                     </ResponsiveContainer>
                 </div>
@@ -713,24 +757,34 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
               <div className="col-span-12 lg:col-span-4 bg-[#182234]/20 border border-[#314368] rounded-xl p-6 flex flex-col h-[400px]">
                 <h3 className="text-white text-sm font-bold uppercase tracking-wide mb-4">Basis Probability Distribution</h3>
                 <div className="flex-1 flex flex-col items-center justify-center relative">
-                    {/* Simplified Bell Curve for Basis */}
+                    {/* Dynamic Bell Curve */}
                     <svg className="w-full h-full" viewBox="0 0 200 100" preserveAspectRatio="none">
                         <path d="M0,90 Q50,90 80,20 Q100,0 120,20 Q150,90 200,90" fill="none" stroke="#0bda5e" strokeWidth="2" />
                         <line x1="100" y1="0" x2="100" y2="100" stroke="#314368" strokeDasharray="2 2" />
-                        <circle cx="120" cy="20" r="4" fill="#fa6238" className="animate-pulse" />
-                        <text x="125" y="20" fontSize="8" fill="#fa6238" fontWeight="bold">Current</text>
+                        
+                        {/* Dynamic Current Point based on Z-Score */}
+                        <circle 
+                            cx={bellCurveDotX} 
+                            cy={bellCurveDotY} 
+                            r="4" 
+                            fill={basisStats.zScore > 0 ? getTrendColor(1, 'fill') : getTrendColor(-1, 'fill')} 
+                            className="transition-all duration-1000 ease-out" 
+                        >
+                            <animate attributeName="r" values="4;6;4" dur="1.5s" repeatCount="indefinite" />
+                        </circle>
+                        <text x={bellCurveDotX} y={bellCurveDotY - 10} fontSize="8" fill={basisStats.zScore > 0 ? getTrendColor(1, 'fill') : getTrendColor(-1, 'fill')} fontWeight="bold" textAnchor="middle">Current</text>
                     </svg>
                 </div>
                 <div className="mt-4 pt-4 border-t border-[#314368]">
                   <div className="flex justify-between items-center text-xs">
                       <span className="text-[#90a4cb]">Current Basis</span>
-                      <span className={`font-bold ${basisTrend >= 0 ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
+                      <span className={`font-bold ${getTrendColor(latestData ? latestData.basis : 0)}`}>
                           {latestData ? latestData.basis : 0} 
                           ({basisTrend >= 0 ? '+' : ''}{basisTrend})
                       </span>
                   </div>
-                  <p className="text-[10px] text-[#90a4cb] mt-2 italic">
-                    Basis derived from {spotSource} is deviating +1.2σ from the mean.
+                  <p className="text-[10px] text-[#90a4cb] mt-2 italic flex items-center gap-1">
+                    Deviation: <span className="text-white font-bold">{basisStats.zScore > 0 ? '+' : ''}{basisStats.zScore.toFixed(2)}σ</span> from mean.
                   </p>
                 </div>
               </div>
@@ -773,7 +827,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                                         <tr key={i} className="hover:bg-[#0d59f2]/5 transition-colors cursor-default">
                                             <td className="px-6 py-4 font-bold text-white">{row.hub}</td>
                                             <td className="px-6 py-4 font-mono text-white">{Math.round(regionalPrice)}</td>
-                                            <td className={`px-6 py-4 font-mono text-xs ${regionalBasis > 0 ? 'text-[#0d59f2]' : 'text-[#fa6238]'}`}>
+                                            <td className={`px-6 py-4 font-mono text-xs ${getTrendColor(regionalBasis)}`}>
                                                 {regionalBasis > 0 ? '+' : ''}{Math.round(regionalBasis)}
                                             </td>
                                             <td className="px-6 py-4">

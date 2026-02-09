@@ -1,5 +1,7 @@
+
 import React from 'react';
 import { SystemClock } from './SystemClock';
+import { getTrendColor } from './GlobalState';
 
 interface PortfolioAssetsProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -219,41 +221,43 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                     </thead>
                     <tbody className="divide-y divide-[#222f49] text-xs font-bold">
                       {[
-                        { symbol: 'ZC', name: 'Corn Futures', contract: 'Dec 24 (ZCZ4)', side: 'Long', sideColor: 'text-[#0bda5e]', size: '50 Contracts', entry: '458.50', market: '462.25', pnl: '+$18,750.00', pnlPct: '+3.2%', pnlColor: 'text-[#0bda5e]', lev: '5.0x', theme: 'primary' },
-                        { symbol: 'ZS', name: 'Soybean Futures', contract: 'Nov 24 (ZSX4)', side: 'Short', sideColor: 'text-[#fa6238]', size: '20 Contracts', entry: '1,192.00', market: '1,184.50', pnl: '+$7,500.00', pnlPct: '+0.6%', pnlColor: 'text-[#0bda5e]', lev: '3.0x', theme: 'success' },
-                        { symbol: 'ZW', name: 'Wheat Futures', contract: 'Sep 24 (ZUU4)', side: 'Long', sideColor: 'text-[#0bda5e]', size: '35 Contracts', entry: '548.75', market: '542.75', pnl: '-$10,500.00', pnlPct: '-1.1%', pnlColor: 'text-[#fa6238]', lev: '2.5x', theme: 'warning' }
-                      ].map((pos, i) => (
-                        <tr key={i} className="hover:bg-white/[0.03] transition-colors group">
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-4">
-                              <div className={`size-10 rounded border flex items-center justify-center font-black text-[11px] uppercase ${
-                                pos.symbol === 'ZC' ? 'bg-[#0d59f2]/20 border-[#0d59f2]/40 text-[#0d59f2]' : 
-                                pos.symbol === 'ZS' ? 'bg-[#0bda5e]/20 border-[#0bda5e]/40 text-[#0bda5e]' : 
-                                'bg-[#fa6238]/20 border-[#fa6238]/40 text-[#fa6238]'
-                              }`}>
-                                {pos.symbol}
-                              </div>
-                              <div className="flex flex-col">
-                                <p className="text-sm font-black text-white uppercase tracking-tight leading-none">{pos.name}</p>
-                                <p className="text-[10px] text-[#90a4cb] font-black uppercase mt-1.5 opacity-60">{pos.contract}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2 py-0.5 rounded ${pos.side === 'Long' ? 'bg-[#0bda5e]/10 text-[#0bda5e]' : 'bg-[#fa6238]/10 text-[#fa6238]'} text-[10px] font-black uppercase tracking-tighter border ${pos.side === 'Long' ? 'border-[#0bda5e]/20' : 'border-[#fa6238]/20'}`}>{pos.side}</span>
-                          </td>
-                          <td className="px-6 py-4 text-right tabular-nums text-white">{pos.size}</td>
-                          <td className="px-6 py-4 text-right tabular-nums text-[#90a4cb]">{pos.entry}</td>
-                          <td className="px-6 py-4 text-right tabular-nums text-white">{pos.market}</td>
-                          <td className="px-6 py-4 text-right">
-                            <span className={`text-sm font-black tabular-nums ${pos.pnlColor}`}>{pos.pnl}</span>
-                            <span className={`block text-[10px] font-black ${pos.pnlColor} mt-0.5`}>{pos.pnlPct}</span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <span className="text-[11px] font-black text-white px-2 py-0.5 border border-[#222f49] rounded tabular-nums bg-[#0a0c10]/40 group-hover:border-[#0d59f2]/40 transition-colors">{pos.lev}</span>
-                          </td>
-                        </tr>
-                      ))}
+                        { symbol: 'ZC', name: 'Corn Futures', contract: 'Dec 24 (ZCZ4)', side: 'Long', size: '50 Contracts', entry: '458.50', market: '462.25', pnl: '+$18,750.00', pnlPct: '+3.2%', lev: '5.0x' },
+                        { symbol: 'ZS', name: 'Soybean Futures', contract: 'Nov 24 (ZSX4)', side: 'Short', size: '20 Contracts', entry: '1,192.00', market: '1,184.50', pnl: '+$7,500.00', pnlPct: '+0.6%', lev: '3.0x' },
+                        { symbol: 'ZW', name: 'Wheat Futures', contract: 'Sep 24 (ZUU4)', side: 'Long', size: '35 Contracts', entry: '548.75', market: '542.75', pnl: '-$10,500.00', pnlPct: '-1.1%', lev: '2.5x' }
+                      ].map((pos, i) => {
+                          const pnlValue = parseFloat(pos.pnlPct.replace('%', ''));
+                          const trendColor = getTrendColor(pnlValue, 'text');
+                          const trendColorBg = `bg-[${getTrendColor(pnlValue, 'stroke')}]/10 border-[${getTrendColor(pnlValue, 'stroke')}]/20`;
+                          
+                          return (
+                            <tr key={i} className="hover:bg-white/[0.03] transition-colors group">
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-4">
+                                  <div className={`size-10 rounded border flex items-center justify-center font-black text-[11px] uppercase ${pos.side === 'Long' ? 'bg-[#0d59f2]/20 border-[#0d59f2]/40 text-[#0d59f2]' : 'bg-[#fa6238]/20 border-[#fa6238]/40 text-[#fa6238]'}`}>
+                                    {pos.symbol}
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <p className="text-sm font-black text-white uppercase tracking-tight leading-none">{pos.name}</p>
+                                    <p className="text-[10px] text-[#90a4cb] font-black uppercase mt-1.5 opacity-60">{pos.contract}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={`px-2 py-0.5 rounded ${pos.side === 'Long' ? 'bg-[#0d59f2]/10 text-[#0d59f2] border border-[#0d59f2]/20' : 'bg-[#fa6238]/10 text-[#fa6238] border border-[#fa6238]/20'} text-[10px] font-black uppercase tracking-tighter`}>{pos.side}</span>
+                              </td>
+                              <td className="px-6 py-4 text-right tabular-nums text-white">{pos.size}</td>
+                              <td className="px-6 py-4 text-right tabular-nums text-[#90a4cb]">{pos.entry}</td>
+                              <td className="px-6 py-4 text-right tabular-nums text-white">{pos.market}</td>
+                              <td className="px-6 py-4 text-right">
+                                <span className={`text-sm font-black tabular-nums ${trendColor}`}>{pos.pnl}</span>
+                                <span className={`block text-[10px] font-black ${trendColor} mt-0.5`}>{pos.pnlPct}</span>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <span className="text-[11px] font-black text-white px-2 py-0.5 border border-[#222f49] rounded tabular-nums bg-[#0a0c10]/40 group-hover:border-[#0d59f2]/40 transition-colors">{pos.lev}</span>
+                              </td>
+                            </tr>
+                          );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -267,20 +271,20 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
       <footer className="h-8 bg-[#0a0c10] border-t border-[#222f49] flex items-center gap-8 px-6 overflow-hidden whitespace-nowrap shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-black text-[#90a4cb] uppercase tracking-[0.2em]">Portfolio PnL (24h):</span>
-          <span className="text-[11px] font-black text-[#0bda5e] tabular-nums">+$15,750.40 (+1.28%)</span>
+          <span className={`text-[11px] font-black ${getTrendColor(1.28)} tabular-nums`}>+$15,750.40 (+1.28%)</span>
         </div>
         <div className="flex gap-8 text-[11px] font-black items-center ml-auto">
           <div className="flex items-center gap-2">
             <span className="text-[#90a4cb] uppercase tracking-tighter">CORN (ZC)</span>
-            <span className="text-[#0bda5e]">462.25 (+1.2%)</span>
+            <span className={getTrendColor(1.2)}>462.25 (+1.2%)</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[#90a4cb] uppercase tracking-tighter">WHEAT (ZW)</span>
-            <span className="text-[#fa6238]">542.75 (-0.8%)</span>
+            <span className={getTrendColor(-0.8)}>542.75 (-0.8%)</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[#90a4cb] uppercase tracking-tighter">SOYBEANS (ZS)</span>
-            <span className="text-[#0bda5e]">1,184.50 (+0.3%)</span>
+            <span className={getTrendColor(0.3)}>1,184.50 (+0.3%)</span>
           </div>
         </div>
       </footer>

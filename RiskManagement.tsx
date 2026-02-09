@@ -1,5 +1,7 @@
+
 import React from 'react';
 import { SystemClock } from './SystemClock';
+import { getTrendColor } from './GlobalState';
 
 interface RiskManagementProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -201,14 +203,14 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                 <h3 className="text-sm font-bold uppercase tracking-wider text-[#90a4cb] mb-6">Stress Test Scenarios</h3>
                 <div className="space-y-4 flex-1">
                   {[
-                    { label: 'Price Crash (-10%)', val: '-$1.2M', desc: 'Estimated impact of sudden liquidity withdrawal in major ag-exchanges.', color: '#fa6238' },
-                    { label: 'Sudden Drought (Brazil)', val: '-$420K', desc: 'Impact on Soybean futures due to supply shock and yield downward revisions.', color: '#ffb347' },
-                    { label: 'Rate Hike (+50bps)', val: '+$112K', desc: 'USD strength impact on international export contracts hedging.', color: '#0bda5e' }
+                    { label: 'Price Crash (-10%)', val: '-$1.2M', desc: 'Estimated impact of sudden liquidity withdrawal in major ag-exchanges.', color: getTrendColor(-1200000, 'text') },
+                    { label: 'Sudden Drought (Brazil)', val: '-$420K', desc: 'Impact on Soybean futures due to supply shock and yield downward revisions.', color: getTrendColor(-420000, 'text') },
+                    { label: 'Rate Hike (+50bps)', val: '+$112K', desc: 'USD strength impact on international export contracts hedging.', color: getTrendColor(112000, 'text') }
                   ].map((scenario, i) => (
-                    <div key={i} className="p-3 bg-[#0a0c10]/40 border-l-4 rounded-r-lg group hover:bg-[#0a0c10] transition-colors" style={{ borderLeftColor: scenario.color }}>
+                    <div key={i} className={`p-3 bg-[#0a0c10]/40 border-l-4 rounded-r-lg group hover:bg-[#0a0c10] transition-colors`} style={{ borderLeftColor: scenario.color.includes('green') || scenario.color.includes('#0bda5e') ? '#0bda5e' : '#fa6238' }}>
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-xs font-bold text-white uppercase tracking-tight">{scenario.label}</span>
-                        <span className="text-xs font-black" style={{ color: scenario.color }}>{scenario.val}</span>
+                        <span className={`text-xs font-black ${scenario.color}`}>{scenario.val}</span>
                       </div>
                       <p className="text-[10px] text-[#90a4cb] leading-relaxed font-medium">{scenario.desc}</p>
                     </div>
@@ -231,7 +233,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
         <div className="flex gap-8 text-[11px] font-bold items-center">
           <div className="flex items-center gap-1.5">
             <span className="text-white uppercase">VIX (VOL)</span>
-            <span className="text-[#fa6238]">24.22 (+4.2%)</span>
+            <span className={getTrendColor(4.2, 'text')}>24.22 (+4.2%)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white uppercase">Margin Call Alert</span>
@@ -239,7 +241,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white uppercase">Drawdown</span>
-            <span className="text-[#ffb347]">-3.8% (24h)</span>
+            <span className={getTrendColor(-3.8, 'text')}>-3.8% (24h)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white uppercase">Liquidity Index</span>

@@ -17,12 +17,10 @@ import { PUSHED_ASSETS, EXCHANGE_MAPPING, PUSHED_ASSET_CONTEXTS, DATA_LAYERS, AL
 import { SystemClock } from './SystemClock';
 
 interface AlgorithmWorkflowProps {
-// ... existing interface ...
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'api') => void;
 }
 
-// ... existing helper functions and logic (processRealData, etc.) ...
-// Data Shape
+// Data Shape (Enhanced for Wide Table)
 interface ProcessingData {
     date: string;
     raw: number;
@@ -30,8 +28,10 @@ interface ProcessingData {
     volume: number;
     openInterest: number;
     gapSize: number;
-    // Fused Layer Value (Generic)
-    layerValue?: number;
+    // Fused Layer Value (For UI Visualization Compatibility)
+    layerValue?: number; 
+    // === DYNAMIC WIDE TABLE COLUMNS (Back-end) ===
+    [key: string]: any; 
 }
 
 // Metrics
@@ -44,27 +44,87 @@ interface QualityMetrics {
     rolloverEfficiency: number;
 }
 
-// Pure function to process Real Data
-const processRealData = (
+// --- CORE ETL ENGINE: ALIGNMENT & FUSION ---
+const processAndFusionData = (
     rawData: any[], 
     gapMethod: string, 
-    activeLayerId: string | null
-): { data: ProcessingData[], metrics: QualityMetrics, layerMeta: any } => {
+    activeLayerId: string | null // Still needed for UI Overlay selection
+): { data: ProcessingData[], metrics: QualityMetrics, layerMeta: any, fusedCount: number } => {
+    
     if (!rawData || rawData.length === 0) return { 
         data: [], 
         metrics: { gapSize: 0, healthScore: 0, trendContinuity: 0, volatilitySmoothness: 0, dataIntegrity: 0, rolloverEfficiency: 0 },
-        layerMeta: null
+        layerMeta: null,
+        fusedCount: 0
     };
 
-    // 1. Detect Average Volatility for Threshold
+    // --- STEP 1: PREPARE SOURCE MAPS (INGESTION & PARSING) ---
+    // We convert all disparate data sources into Maps or Sorted Arrays for O(1) or O(log n) access.
+    
+    const weatherMap = new Map<string, any>();
+    const spotMap = new Map<string, any>();
+    
+    // Low Frequency / Sparse Data (Requires Forward Fill pointers)
+    let satData: any[] = [];
+    let macroData: any[] = [];
+    let customData: any[] = [];
+
+    // Ingest Weather
+    const weatherLayer = DATA_LAYERS.get('weather');
+    if (weatherLayer && weatherLayer.weatherPackage) {
+        weatherLayer.weatherPackage.timeSeries.forEach(d => {
+            // Key: Date string YYYY-MM-DD
+            weatherMap.set(d.date, { 
+                weather_soil: d.soil, 
+                weather_precip: d.precip, 
+                weather_gdd: d.gdd,
+                weather_temp_max: d.tempMax 
+            });
+        });
+    }
+
+    // Ingest Satellite (Sort by date for FF)
+    const satLayer = DATA_LAYERS.get('satellite');
+    if (satLayer && satLayer.satellitePackage) {
+        // ndviSeries usually contains objects with 'date' and 'target' (NDVI)
+        satData = [...satLayer.satellitePackage.ndviSeries].sort((a,b) => a.date.localeCompare(b.date));
+    }
+
+    // Ingest Supply/Macro
+    const supplyLayer = DATA_LAYERS.get('supply');
+    if (supplyLayer && supplyLayer.macroPackage) {
+        macroData = [...supplyLayer.macroPackage.timeSeries].sort((a,b) => a.date.localeCompare(b.date));
+    }
+
+    // Ingest Spot
+    const spotLayer = DATA_LAYERS.get('spot');
+    if (spotLayer && spotLayer.spotPackage) {
+        spotLayer.spotPackage.basisSeries.forEach(d => {
+            spotMap.set(d.date, {
+                spot_price: d.spotPrice,
+                spot_basis: d.basis,
+                spot_inventory: d.inventory
+            });
+        });
+    }
+
+    // Ingest Knowledge/Custom
+    const customLayer = DATA_LAYERS.get('knowledge');
+    if (customLayer && customLayer.knowledgePackage) {
+        customData = [...customLayer.knowledgePackage.quantifiedSeries].sort((a: any, b: any) => a.date.localeCompare(b.date));
+    }
+
+    // --- STEP 2: PRICE ADJUSTMENT (CLEANING) ---
+    
+    // Detect Average Volatility
     let totalVol = 0;
     for (let i = 1; i < rawData.length; i++) {
         totalVol += Math.abs((rawData[i].close - rawData[i-1].close) / rawData[i-1].close);
     }
     const avgVol = totalVol / (rawData.length - 1);
-    const gapThreshold = avgVol * 4; // 4 sigma jump considered a gap
+    const gapThreshold = avgVol * 4; 
 
-    // 2. Identify Gaps & Calculate Cumulative Offsets
+    // Identify Gaps
     const gaps = new Array(rawData.length).fill(0);
     let gapCount = 0;
     let maxJump = 0;
@@ -75,7 +135,6 @@ const processRealData = (
         const pctChange = (curr - prev) / prev;
         
         if (Math.abs(pctChange) > gapThreshold) {
-            // It's a gap
             const jump = curr - prev;
             gaps[i] = jump;
             gapCount++;
@@ -83,44 +142,36 @@ const processRealData = (
         }
     }
 
-    // 3. Apply Adjustments
+    // Calculate Cumulative Offsets
     let cumulativeGap = 0;
     const offsetArray = new Array(rawData.length).fill(0);
-    
     for (let i = 0; i < rawData.length; i++) {
         cumulativeGap += gaps[i];
         offsetArray[i] = cumulativeGap;
     }
-    
     const totalGap = offsetArray[rawData.length - 1];
-    const data: ProcessingData[] = [];
+
+    // --- STEP 3: ALIGNMENT & MERGE (ETL MAIN LOOP) ---
+    
+    const fusedData: ProcessingData[] = [];
     let sumReturns = 0;
+    
+    // State pointers for Forward Filling
+    let lastSatVal: number | null = null;
+    let lastMacroVal: number | null = null;
+    let lastCustomVal: number | null = null;
 
-    // --- FUSION LOGIC: DYNAMIC LAYER MERGE ---
-    const layerMap = new Map<string, number>();
-    let layerMeta = null;
-
-    if (activeLayerId && DATA_LAYERS.has(activeLayerId)) {
-        const layer = DATA_LAYERS.get(activeLayerId)!;
-        
-        if (layer.weatherPackage) {
-            // Priority: High-Dim Weather
-            layerMeta = layer.weatherPackage.metadata;
-            layer.weatherPackage.timeSeries.forEach(p => {
-                // Use Soil Moisture as primary signal for fusion graph
-                if(!p.isForecast) layerMap.set(p.date, p.soil);
-            });
-        } else {
-            // Fallback: Simple Signal
-            layer.data.forEach(p => layerMap.set(p.date, p.value));
-        }
-    }
+    // Helper pointers to optimize array traversal (avoid O(N^2))
+    let satIdx = 0;
+    let macroIdx = 0;
+    let customIdx = 0;
 
     for (let i = 0; i < rawData.length; i++) {
         const rawPrice = rawData[i].close;
-        const dateStr = rawData[i].date;
+        const dateStr = rawData[i].date; // MASTER INDEX DATE
+        
+        // A. Price Adjustment
         let adjustedPrice = rawPrice;
-
         if (gapMethod === 'FRONT_ADJ') {
             adjustedPrice = rawPrice - offsetArray[i];
         } else if (gapMethod === 'BACK_ADJ') {
@@ -128,19 +179,71 @@ const processRealData = (
         } 
 
         if (i > 0) {
-             const prevAdj = data[i-1].adjusted;
+             const prevAdj = fusedData[i-1].adjusted;
              sumReturns += Math.abs(adjustedPrice - prevAdj);
         }
 
-        data.push({
+        // B. Multi-Source Fusion
+        
+        // 1. Weather (Direct Match)
+        const wData = weatherMap.get(dateStr) || {}; 
+        
+        // 2. Satellite (Forward Fill)
+        // Advance pointer until we find a satellite date > current date
+        while (satIdx < satData.length && satData[satIdx].date <= dateStr) {
+            if (satData[satIdx].target !== null) lastSatVal = satData[satIdx].target; // Update known value
+            satIdx++;
+        }
+        
+        // 3. Macro (Forward Fill)
+        while (macroIdx < macroData.length && macroData[macroIdx].date <= dateStr) {
+            if (macroData[macroIdx].aiScore !== null) lastMacroVal = macroData[macroIdx].aiScore;
+            macroIdx++;
+        }
+
+        // 4. Spot (Direct Match)
+        const sData = spotMap.get(dateStr) || {};
+
+        // 5. Custom (Forward Fill)
+        while (customIdx < customData.length && customData[customIdx].date <= dateStr) {
+            if (customData[customIdx].score !== null) lastCustomVal = customData[customIdx].score;
+            customIdx++;
+        }
+
+        // C. Construct Wide Row
+        const row: ProcessingData = {
             date: dateStr,
             raw: rawPrice,
             adjusted: parseFloat(adjustedPrice.toFixed(2)),
+            open: rawData[i].open,
+            high: rawData[i].high,
+            low: rawData[i].low,
             volume: rawData[i].volume || 0,
             openInterest: rawData[i].open_interest || 0,
             gapSize: gaps[i],
-            layerValue: layerMap.get(dateStr) // Will be undefined if no match, handled by Recharts connectNulls
-        });
+            
+            // Fused Fields
+            ...wData, // weather_soil, weather_precip...
+            sat_ndvi: lastSatVal,
+            macro_ai_score: lastMacroVal,
+            ...sData, // spot_price, spot_basis, spot_inventory
+            custom_ai_score: lastCustomVal
+        };
+
+        // D. Determine UI Visualization Layer Value (Legacy Support)
+        if (activeLayerId === 'weather') row.layerValue = row.weather_soil;
+        else if (activeLayerId === 'satellite') row.layerValue = row.sat_ndvi;
+        else if (activeLayerId === 'supply') row.layerValue = row.macro_ai_score;
+        else if (activeLayerId === 'spot') row.layerValue = row.spot_basis;
+        else if (activeLayerId === 'knowledge') row.layerValue = row.custom_ai_score;
+        else if (activeLayerId && DATA_LAYERS.has(activeLayerId)) {
+             // Fallback for simple layers without packages
+             const simpleLayer = DATA_LAYERS.get(activeLayerId)!;
+             const match = simpleLayer.data.find(d => d.date === dateStr);
+             row.layerValue = match ? match.value : undefined;
+        }
+
+        fusedData.push(row);
     }
 
     // Normalized Metrics (0-100)
@@ -150,8 +253,26 @@ const processRealData = (
     const integrity = rawData.length > 0 ? 100 : 0;
     const rolloverEfficiency = 95; 
 
+    // Count Fusion Sources
+    let fusedCount = 0;
+    if (weatherMap.size > 0) fusedCount++;
+    if (satData.length > 0) fusedCount++;
+    if (macroData.length > 0) fusedCount++;
+    if (spotMap.size > 0) fusedCount++;
+    if (customData.length > 0) fusedCount++;
+
+    // Extract Meta for UI Display from Active Layer
+    let layerMeta = null;
+    if (activeLayerId && DATA_LAYERS.has(activeLayerId)) {
+        const layer = DATA_LAYERS.get(activeLayerId)!;
+        if (layer.weatherPackage) layerMeta = layer.weatherPackage.metadata;
+        else if (layer.satellitePackage) layerMeta = layer.satellitePackage.metadata;
+        else if (layer.macroPackage) layerMeta = layer.macroPackage.metadata;
+        else if (layer.spotPackage) layerMeta = layer.spotPackage.metadata;
+    }
+
     return {
-        data,
+        data: fusedData,
         metrics: {
             gapSize: gapCount,
             healthScore: parseFloat(((trendContinuity + volatilitySmoothness) / 2).toFixed(1)),
@@ -160,12 +281,12 @@ const processRealData = (
             dataIntegrity: integrity,
             rolloverEfficiency
         },
-        layerMeta
+        layerMeta,
+        fusedCount
     };
 };
 
 export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate }) => {
-  // ... (State hooks retained exactly as before) ...
   const [selectedAsset, setSelectedAsset] = useState(() => {
       if (ALGO_VIEW_CACHE.selectedAsset && PUSHED_ASSETS.has(ALGO_VIEW_CACHE.selectedAsset)) {
           return ALGO_VIEW_CACHE.selectedAsset;
@@ -249,9 +370,10 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
       onNavigate('featureEngineering');
   };
 
+  // Re-run fusion if visualization layer changes, but only if pipeline already completed
   useEffect(() => {
       if (status === 'COMPLETED' && rawDataCache.length > 0) {
-          const { data, metrics: newMetrics, layerMeta: meta } = processRealData(rawDataCache, gapMethod, activeLayerId);
+          const { data, metrics: newMetrics, layerMeta: meta } = processAndFusionData(rawDataCache, gapMethod, activeLayerId);
           setChartData(data);
           setMetrics(newMetrics);
           setLayerMeta(meta);
@@ -275,6 +397,8 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
     setStatus('PROCESSING');
     setLogs([]);
     setActiveStep(1);
+    
+    // 1. JQData Connection
     const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
     const jqNode = savedConns.find((c: any) => c.provider === 'JQData (JoinQuant)');
     if (!jqNode || !jqNode.username) {
@@ -282,6 +406,8 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
         setStatus('IDLE');
         return;
     }
+
+    // 2. Context Loading
     const context = PUSHED_ASSET_CONTEXTS.get(selectedAsset);
     let symbol = selectedAsset;
     let startDate = "";
@@ -302,7 +428,9 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
         startDate = d.toISOString().split('T')[0];
         setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [WARN] No specific context found. Defaulting to 1 year history.`]);
     }
+
     try {
+        // 3. Ingest Futures Data (Backbone)
         setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Connecting to JQData Bridge...`]);
         const response = await fetch(`${jqNode.url.trim().replace(/\/$/, '')}/api/jqdata/price`, {
             method: 'POST',
@@ -321,27 +449,44 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
         if (!json.success || !json.data) throw new Error(json.error || "No data returned");
         const rawData = json.data;
         setRawDataCache(rawData); 
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Downloaded ${rawData.length} bars.`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Downloaded ${rawData.length} futures bars.`]);
+        
         setActiveStep(2);
         await new Promise(r => setTimeout(r, 500));
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [CLEAN] Running outlier detection (3σ filter)...`]);
-        if (activeLayerId && DATA_LAYERS.has(activeLayerId)) {
-             const layer = DATA_LAYERS.get(activeLayerId)!;
-             setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [FUSION] Merging Layer: ${layer.name}`]);
+        
+        // 4. Scanning Data Layers
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [SCAN] Scanning Data Bus for Fusion Layers...`]);
+        const layers = Array.from(DATA_LAYERS.values());
+        if (layers.length > 0) {
+            layers.forEach(l => {
+                setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [FOUND] Layer: ${l.name} (${l.sourceId})`]);
+            });
+        } else {
+            setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INFO] No external layers found. Processing Price Only.`]);
         }
+
+        // 5. Alignment & Fusion (ETL)
         setActiveStep(3);
         await new Promise(r => setTimeout(r, 500));
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ALIGN] Rollover Detection: ${rolloverRule} Logic Active.`]);
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ADJUST] Processing Gaps via ${gapMethod}...`]);
-        const { data, metrics: finalMetrics, layerMeta: meta } = processRealData(rawData, gapMethod, activeLayerId);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ALIGN] Establishing Master Date Index based on Futures Trading Days.`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [TRANSFORM] Executing Forward-Fill / Date-Match algorithms...`]);
+        
+        const { data, metrics: finalMetrics, layerMeta: meta, fusedCount } = processAndFusionData(rawData, gapMethod, activeLayerId);
+        
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [MERGE] Integrated ${fusedCount} external data dimensions.`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ADJUST] Applied '${gapMethod}' to Price Series.`]);
+
+        // 6. Validation & Completion
         setActiveStep(4);
         await new Promise(r => setTimeout(r, 500));
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [VALIDATE] Consistency Check: Passed.`]);
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} >> PIPELINE SUCCESS. Ready for Feature Eng.`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [VALIDATE] Wide Table Generated: ${data.length} rows.`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} >> PIPELINE SUCCESS. Dataset Ready for Feature Eng.`]);
+        
         setChartData(data);
         setMetrics(finalMetrics);
         setLayerMeta(meta);
         setStatus('COMPLETED');
+
     } catch (e: any) {
         setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ERROR] Pipeline Failed: ${e.message}`]);
         setStatus('IDLE');
@@ -585,7 +730,7 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
                   {logs.map((log, i) => (
                     <div key={i} className="mb-1 animate-in fade-in slide-in-from-left-2 duration-300">
                       <span className="text-slate-600 mr-2">{log.split(' ')[0]}</span>
-                      <span className={log.includes('SUCCESS') ? 'text-[#0bda5e]' : log.includes('ERROR') ? 'text-[#fa6238]' : log.includes('FUSION') ? 'text-[#ffb347]' : 'text-slate-300'}>
+                      <span className={log.includes('SUCCESS') ? 'text-[#0bda5e]' : log.includes('ERROR') ? 'text-[#fa6238]' : log.includes('MERGE') ? 'text-[#ffb347]' : 'text-slate-300'}>
                         {log.substring(log.indexOf(' '))}
                       </span>
                     </div>

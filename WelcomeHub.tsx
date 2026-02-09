@@ -51,9 +51,10 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
   const [selectedAssetCode, setSelectedAssetCode] = useState(GLOBAL_MARKET_CONTEXT.asset.code);
   const [startDate, setStartDate] = useState(GLOBAL_MARKET_CONTEXT.startDate);
   const [endDate, setEndDate] = useState(GLOBAL_MARKET_CONTEXT.endDate);
+  const [colorMode, setColorMode] = useState<'US' | 'CN'>(GLOBAL_MARKET_CONTEXT.colorMode);
 
   // Update Global State on change
-  const handleContextUpdate = (key: 'code' | 'start' | 'end', value: string) => {
+  const handleContextUpdate = (key: 'code' | 'start' | 'end' | 'color', value: string) => {
       if (key === 'code') {
           setSelectedAssetCode(value);
           // Find Name
@@ -69,6 +70,10 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
       } else if (key === 'end') {
           setEndDate(value);
           GLOBAL_MARKET_CONTEXT.endDate = value;
+      } else if (key === 'color') {
+          const mode = value as 'US' | 'CN';
+          setColorMode(mode);
+          GLOBAL_MARKET_CONTEXT.colorMode = mode;
       }
       GLOBAL_MARKET_CONTEXT.isContextSet = true;
   };
@@ -185,7 +190,6 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
 
         {/* --- GLOBAL MARKET CONTEXT FOOTER --- */}
         <div className="absolute bottom-0 left-0 right-0 border-t border-[#0d59f2]/30 bg-[#0a0e17]/95 backdrop-blur-xl p-0 flex justify-center z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-            {/* Widen container for better spacing on large screens */}
             <div className="w-full max-w-[1600px] px-8 py-5 flex items-center justify-between gap-6">
                 
                 <div className="flex items-center gap-4 shrink-0">
@@ -194,11 +198,11 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
                     </div>
                     <div className="flex flex-col">
                         <span className="text-[10px] font-black text-[#0d59f2] uppercase tracking-[0.2em]">Global Analysis Context</span>
-                        <span className="text-xs text-[#90a4cb] font-medium">Define your target asset and time horizon for the session.</span>
+                        <span className="text-xs text-[#90a4cb] font-medium">Define your target asset and time horizon.</span>
                     </div>
                 </div>
 
-                {/* Central Control Block - Widened */}
+                {/* Central Control Block */}
                 <div className="flex-1 flex justify-center">
                     <div className="flex items-center gap-8 bg-[#101622] border border-[#314368] rounded-2xl px-8 py-3 shadow-inner">
                         
@@ -209,7 +213,6 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
                                 <select 
                                     value={selectedAssetCode}
                                     onChange={(e) => handleContextUpdate('code', e.target.value)}
-                                    // Increased width to 240px
                                     className="appearance-none bg-transparent text-white text-sm font-bold uppercase tracking-wide outline-none cursor-pointer w-[240px] border-b border-transparent group-hover:border-[#0d59f2] transition-colors pb-0.5 truncate"
                                 >
                                     {AVAILABLE_ASSETS.map((group) => (
@@ -233,8 +236,7 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
                                 type="date" 
                                 value={startDate}
                                 onChange={(e) => handleContextUpdate('start', e.target.value)}
-                                // Increased width to 160px for full date visibility
-                                className="bg-transparent text-white text-sm font-mono font-bold outline-none cursor-pointer hover:text-[#0d59f2] transition-colors w-[160px]"
+                                className="bg-transparent text-white text-sm font-mono font-bold outline-none cursor-pointer hover:text-[#0d59f2] transition-colors w-[140px]"
                             />
                         </div>
 
@@ -247,9 +249,29 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
                                 type="date" 
                                 value={endDate}
                                 onChange={(e) => handleContextUpdate('end', e.target.value)}
-                                // Increased width to 160px for full date visibility
-                                className="bg-transparent text-white text-sm font-mono font-bold outline-none cursor-pointer hover:text-[#0d59f2] transition-colors w-[160px]"
+                                className="bg-transparent text-white text-sm font-mono font-bold outline-none cursor-pointer hover:text-[#0d59f2] transition-colors w-[140px]"
                             />
+                        </div>
+
+                        <div className="w-px h-10 bg-[#314368]"></div>
+
+                        {/* Color Mode Toggle */}
+                        <div className="flex flex-col items-center">
+                            <label className="text-[8px] font-bold text-[#90a4cb] uppercase tracking-widest mb-1">Trend Colors</label>
+                            <div className="flex bg-[#0a0c10] rounded-lg p-0.5 border border-[#314368]">
+                                <button 
+                                    onClick={() => handleContextUpdate('color', 'US')}
+                                    className={`px-3 py-1 text-[9px] font-bold rounded transition-all ${colorMode === 'US' ? 'bg-[#0bda5e] text-[#0a0c10]' : 'text-[#90a4cb] hover:text-white'}`}
+                                >
+                                    Global (G/R)
+                                </button>
+                                <button 
+                                    onClick={() => handleContextUpdate('color', 'CN')}
+                                    className={`px-3 py-1 text-[9px] font-bold rounded transition-all ${colorMode === 'CN' ? 'bg-[#fa6238] text-white' : 'text-[#90a4cb] hover:text-white'}`}
+                                >
+                                    CN (R/G)
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

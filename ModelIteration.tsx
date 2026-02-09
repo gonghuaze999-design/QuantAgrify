@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import {
@@ -185,20 +186,19 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
       const weights = activeModel.package.attribution.weights;
       return Object.entries(weights).map(([name, weight]) => ({
           name, 
-          weight: parseFloat((weight * 100).toFixed(1))
+          weight: parseFloat((Number(weight) * 100).toFixed(1))
       })).sort((a, b) => b.weight - a.weight);
   }, [activeModel]);
 
   const rollingSharpeData = useMemo(() => {
       if (!activeModel) return [];
       // Calculate 30-day Rolling Sharpe
-      // FIX: Use explicit safe access to previous element to avoid TS arithmetic errors
       const ts = activeModel.package.timeSeries;
       const returns = ts.map((d, i) => {
           if (i === 0) return 0;
           const prev = ts[i-1];
-          const prevEquity = prev ? prev.equity : d.equity;
-          return (d.equity - prevEquity) / prevEquity;
+          if (!prev) return 0;
+          return (d.equity - prev.equity) / prev.equity;
       });
       
       const window = 22; // ~1 Month
