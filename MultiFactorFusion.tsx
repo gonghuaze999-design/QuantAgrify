@@ -587,7 +587,7 @@ export const MultiFactorFusion: React.FC<MultiFactorFusionProps> = ({ onNavigate
                                     <Legend verticalAlign="top" height={36}/>
                                     
                                     <Area yAxisId="price" type="monotone" dataKey="close" stroke="#555" fill="#555" fillOpacity={0.1} strokeWidth={1} name="Asset Price" connectNulls={false} />
-                                    <Line yAxisId="signal" type="step" dataKey="compositeSignal" stroke="#0bda5e" strokeWidth={2} dot={false} name="Alpha Score" animationDuration={500} connectNulls={false} />
+                                    <Line yAxisId="signal" type="step" dataKey="compositeSignal" stroke="var(--trend-up)" strokeWidth={2} dot={false} name="Alpha Score" animationDuration={500} connectNulls={false} />
                                     
                                     <Brush dataKey="date" height={30} stroke="#314368" fill="#101622" />
                                 </ComposedChart>

@@ -29,7 +29,7 @@ export const GLOBAL_MARKET_CONTEXT = {
 
 // === COLOR UTILITY HELPER ===
 export const getTrendColor = (value: number | string, type: 'text' | 'bg' | 'stroke' | 'fill' = 'text') => {
-    const mode = GLOBAL_MARKET_CONTEXT.colorMode;
+    // Mode logic is now handled by CSS Variables, but we check logic here for Up/Down determination
     let isPositive = false;
 
     if (typeof value === 'number') {
@@ -43,22 +43,15 @@ export const getTrendColor = (value: number | string, type: 'text' | 'bg' | 'str
         else isPositive = true; // Default to positive style for neutral/unknown strings unless explicitly negative
     }
 
-    // Define Base Colors
-    const GREEN = '#0bda5e';
-    const RED = '#fa6238';
-
-    // Logic: 
-    // US Mode: Up/Positive = Green, Down/Negative = Red
-    // CN Mode: Up/Positive = Red, Down/Negative = Green
-    const colorUp = mode === 'CN' ? RED : GREEN;
-    const colorDown = mode === 'CN' ? GREEN : RED;
+    // Use CSS Variables instead of Hardcoded Hex
+    const colorUp = 'var(--trend-up)';
+    const colorDown = 'var(--trend-down)';
 
     const finalColor = isPositive ? colorUp : colorDown;
 
     if (type === 'stroke' || type === 'fill') return finalColor;
     
-    // For Tailwind classes, we use arbitrary values. 
-    // Note: React re-renders will pick up the new class string.
+    // For Tailwind classes, we use arbitrary values referencing the CSS variable
     if (type === 'bg') return `bg-[${finalColor}]`;
     return `text-[${finalColor}]`;
 };
@@ -325,7 +318,87 @@ export interface DataLayer {
     timestamp: number;
 }
 
-export const DATA_LAYERS = new Map<string, DataLayer>();
+// === CENTRAL LOGGING SYSTEM (SystemLogStream) ===
+// Implemented before DATA_LAYERS so the proxy can use it.
+
+export interface LogEntry {
+    id: string;
+    timestamp: number;
+    timestampStr: string; // HH:MM:SS
+    module: string;       // e.g., "Algorithm", "Network"
+    action: string;       // e.g., "Fetch Data", "Push Signal"
+    type: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'DATA_PACKET';
+    message: string;
+    payload?: any;        // Complex object for JSON viewer
+}
+
+type LogListener = (entry: LogEntry) => void;
+
+export const SystemLogStream = {
+    logs: [] as LogEntry[],
+    listeners: [] as LogListener[],
+
+    // Subscribe to new logs
+    subscribe(listener: LogListener) {
+        this.listeners.push(listener);
+        return () => {
+            this.listeners = this.listeners.filter(l => l !== listener);
+        };
+    },
+
+    // Push a new log entry
+    push(entry: Omit<LogEntry, 'id' | 'timestamp' | 'timestampStr'>) {
+        const fullEntry: LogEntry = {
+            ...entry,
+            id: crypto.randomUUID ? crypto.randomUUID() : `log_${Date.now()}_${Math.random()}`,
+            timestamp: Date.now(),
+            timestampStr: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        };
+        
+        this.logs.push(fullEntry);
+        
+        // Rolling buffer: Keep last 2000 logs to manage memory
+        if (this.logs.length > 2000) this.logs.shift();
+        
+        this.listeners.forEach(l => l(fullEntry));
+    },
+    
+    // Get current history
+    getHistory() {
+        return this.logs;
+    }
+};
+
+// === INTERCEPTED DATA LAYER (PROXY PATTERN) ===
+// We wrap the Map in a Proxy to detect .set() calls and log them to SystemLogStream automatically.
+
+const _dataLayersMap = new Map<string, DataLayer>();
+
+export const DATA_LAYERS = new Proxy(_dataLayersMap, {
+    get(target, prop, receiver) {
+        // Intercept the 'set' method
+        if (prop === 'set') {
+            return function (key: string, value: DataLayer) {
+                // 1. Log to Central System
+                SystemLogStream.push({
+                    type: 'DATA_PACKET',
+                    module: 'GlobalDataBus',
+                    action: 'Push Layer',
+                    message: `Pushing [${value.sourceId}] to Pipeline: ${value.name}`,
+                    payload: value // Capture full payload for JSON inspection
+                });
+                
+                // 2. Perform the actual set operation
+                return target.set(key, value);
+            }
+        }
+        
+        // Default behavior for other methods (get, has, delete, etc.)
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+    }
+});
+
 
 // 4. Algorithm Workflow State Persistence (View Cache)
 export const ALGO_VIEW_CACHE = {

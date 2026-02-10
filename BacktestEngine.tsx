@@ -1,5 +1,7 @@
+
 import React from 'react';
 import { SystemClock } from './SystemClock';
+import { getTrendColor } from './GlobalState';
 
 interface BacktestEngineProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -136,10 +138,10 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
             {/* Top Metrics Row */}
             <div className="col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: 'Sharpe Ratio', val: '2.84', trend: '+0.4 vs Benchmark', color: 'text-[#0bda5e]' },
-                { label: 'Sortino Ratio', val: '3.12', trend: 'Excellent risk-adj', color: 'text-[#0bda5e]' },
-                { label: 'Max Drawdown', val: '-8.42%', trend: 'Recovery: 42 days', color: 'text-[#fa6238]', valColor: 'text-[#fa6238]' },
-                { label: 'Calmar Ratio', val: '2.55', trend: 'Optimal leverage', color: 'text-[#0bda5e]' }
+                { label: 'Sharpe Ratio', val: '2.84', trend: '+0.4 vs Benchmark', color: 'text-[var(--trend-up)]' },
+                { label: 'Sortino Ratio', val: '3.12', trend: 'Excellent risk-adj', color: 'text-[var(--trend-up)]' },
+                { label: 'Max Drawdown', val: '-8.42%', trend: 'Recovery: 42 days', color: 'text-[var(--trend-down)]', valColor: 'text-[var(--trend-down)]' },
+                { label: 'Calmar Ratio', val: '2.55', trend: 'Optimal leverage', color: 'text-[var(--trend-up)]' }
               ].map(metric => (
                 <div key={metric.label} className="bg-[#182234] border border-[#222f49] p-4 rounded-xl">
                   <span className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">{metric.label}</span>
@@ -159,7 +161,7 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
                   </h3>
                   <div className="flex gap-4">
                     <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[#0d59f2] rounded-sm"></span><span className="text-[10px] text-[#90a4cb] font-bold uppercase">Equity</span></div>
-                    <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[#fa6238]/30 rounded-sm"></span><span className="text-[10px] text-[#90a4cb] font-bold uppercase">Drawdown</span></div>
+                    <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[var(--trend-down)] opacity-30 rounded-sm"></span><span className="text-[10px] text-[#90a4cb] font-bold uppercase">Drawdown</span></div>
                   </div>
                 </div>
                 <div className="relative h-64 w-full">
@@ -167,9 +169,9 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
                     <line stroke="#222f49" strokeWidth="1" x1="0" x2="800" y1="50" y2="50" />
                     <line stroke="#222f49" strokeWidth="1" x1="0" x2="800" y1="100" y2="100" />
                     <line stroke="#222f49" strokeWidth="1" x1="0" x2="800" y1="150" y2="150" />
-                    {/* Drawdown areas */}
-                    <path d="M120 110 L 160 140 L 200 120 L 120 110" fill="#fa6238" fillOpacity="0.3" />
-                    <path d="M400 60 L 450 100 L 500 80 L 400 60" fill="#fa6238" fillOpacity="0.3" />
+                    {/* Drawdown areas - Use CSS Variable for Fill */}
+                    <path d="M120 110 L 160 140 L 200 120 L 120 110" fill="var(--trend-down)" fillOpacity="0.3" />
+                    <path d="M400 60 L 450 100 L 500 80 L 400 60" fill="var(--trend-down)" fillOpacity="0.3" />
                     {/* Equity curve */}
                     <path d="M0 160 Q 100 150, 150 110 T 300 100 T 450 60 T 600 50 T 800 20" fill="none" stroke="#0d59f2" strokeWidth="3" />
                     <path d="M0 160 Q 100 150, 150 110 T 300 100 T 450 60 T 600 50 T 800 20 V 200 H 0 Z" fill="url(#mainEquityGradient)" />
@@ -202,11 +204,16 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
                       {row.data.map((val, i) => {
                         const isPositive = val > 0;
                         const isNeutral = val === 0;
-                        let bgClass = 'bg-[#222f49]/50';
-                        if (isPositive) bgClass = val > 3 ? 'bg-[#0bda5e]/90' : val > 1.5 ? 'bg-[#0bda5e]/60' : 'bg-[#0bda5e]/30';
-                        else if (!isNeutral) bgClass = val < -2 ? 'bg-[#fa6238]/80' : 'bg-[#fa6238]/40';
+                        // Determine opacity based on magnitude
+                        const opacity = Math.min(0.9, 0.2 + Math.abs(val) / 5);
+                        const bgColor = isPositive ? 'var(--trend-up)' : isNeutral ? '#222f49' : 'var(--trend-down)';
+                        
                         return (
-                          <div key={i} className={`h-8 flex items-center justify-center text-[10px] font-bold rounded-sm text-white ${bgClass}`}>
+                          <div 
+                            key={i} 
+                            className="h-8 flex items-center justify-center text-[10px] font-bold rounded-sm text-white"
+                            style={{ backgroundColor: bgColor, opacity: isNeutral ? 0.5 : opacity }}
+                          >
                             {val > 0 ? `+${val}` : val}
                           </div>
                         );
@@ -217,7 +224,7 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
                 <div className="mt-6 border-t border-[#222f49] pt-4">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-[#90a4cb] tracking-widest uppercase">Annualized Return</span>
-                    <span className="text-sm font-bold text-[#0bda5e] tracking-tight">+21.4%</span>
+                    <span className="text-sm font-bold text-[var(--trend-up)] tracking-tight">+21.4%</span>
                   </div>
                 </div>
               </div>
@@ -251,9 +258,9 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
                     </thead>
                     <tbody className="divide-y divide-[#222f49]">
                       {[
-                        { asset: 'CORN (ZC1!)', entryT: '2023-11-14 09:30:12', entryP: '452.25', exitT: '2023-11-16 14:22:05', exitP: '465.50', pnl: '+$1,325.00', status: 'Profit', color: 'text-[#0bda5e]', bg: 'bg-[#0bda5e]/10' },
-                        { asset: 'WHEAT (ZW1!)', entryT: '2023-11-12 11:15:44', entryP: '540.00', exitT: '2023-11-13 10:05:22', exitP: '534.25', pnl: '-$575.00', status: 'Loss', color: 'text-[#fa6238]', bg: 'bg-[#fa6238]/10' },
-                        { asset: 'SOYBEANS (ZS1!)', entryT: '2023-11-08 15:45:00', entryP: '1,170.50', exitT: '2023-11-10 16:00:00', exitP: '1,192.00', pnl: '+$2,150.00', status: 'Profit', color: 'text-[#0bda5e]', bg: 'bg-[#0bda5e]/10' }
+                        { asset: 'CORN (ZC1!)', entryT: '2023-11-14 09:30:12', entryP: '452.25', exitT: '2023-11-16 14:22:05', exitP: '465.50', pnl: '+$1,325.00', status: 'Profit', trend: 1 },
+                        { asset: 'WHEAT (ZW1!)', entryT: '2023-11-12 11:15:44', entryP: '540.00', exitT: '2023-11-13 10:05:22', exitP: '534.25', pnl: '-$575.00', status: 'Loss', trend: -1 },
+                        { asset: 'SOYBEANS (ZS1!)', entryT: '2023-11-08 15:45:00', entryP: '1,170.50', exitT: '2023-11-10 16:00:00', exitP: '1,192.00', pnl: '+$2,150.00', status: 'Profit', trend: 1 }
                       ].map((trade, i) => (
                         <tr key={i} className="hover:bg-white/5 transition-colors group">
                           <td className="px-6 py-4 font-bold text-white uppercase">{trade.asset}</td>
@@ -261,9 +268,14 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
                           <td className="px-6 py-4 text-white font-mono">{trade.entryP}</td>
                           <td className="px-6 py-4 text-[#90a4cb] font-mono">{trade.exitT}</td>
                           <td className="px-6 py-4 text-white font-mono">{trade.exitP}</td>
-                          <td className={`px-6 py-4 text-right font-black ${trade.color}`}>{trade.pnl}</td>
+                          <td className={`px-6 py-4 text-right font-black ${getTrendColor(trade.trend, 'text')}`}>{trade.pnl}</td>
                           <td className="px-6 py-4 text-center">
-                            <span className={`${trade.bg} ${trade.color} text-[9px] px-2 py-0.5 rounded border ${trade.color.replace('text-', 'border-')}/20 font-black uppercase tracking-tighter`}>{trade.status}</span>
+                            <span 
+                                className={`text-[9px] px-2 py-0.5 rounded border font-black uppercase tracking-tighter ${getTrendColor(trade.trend, 'text')}`}
+                                style={{ borderColor: trade.trend > 0 ? 'var(--trend-up)' : 'var(--trend-down)', backgroundColor: trade.trend > 0 ? 'rgba(var(--trend-up-rgb), 0.1)' : 'rgba(var(--trend-down-rgb), 0.1)' }}
+                            >
+                                {trade.status}
+                            </span>
                           </td>
                         </tr>
                       ))}
@@ -284,19 +296,19 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
         <div className="flex gap-8 text-[11px] font-bold items-center">
           <div className="flex items-center gap-1.5">
             <span className="text-white">CORN (ZC)</span>
-            <span className="text-[#0bda5e]">462.25 (+1.2%)</span>
+            <span className={getTrendColor(1.2)}>462.25 (+1.2%)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white">WHEAT (ZW)</span>
-            <span className="text-[#fa6238]">542.75 (-0.8%)</span>
+            <span className={getTrendColor(-0.8)}>542.75 (-0.8%)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white">SOYBEANS (ZS)</span>
-            <span className="text-[#0bda5e]">1,184.50 (+0.3%)</span>
+            <span className={getTrendColor(0.3)}>1,184.50 (+0.3%)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white">USD INDEX (DXY)</span>
-            <span className="text-[#0bda5e]">104.22 (+0.05%)</span>
+            <span className={getTrendColor(0.05)}>104.22 (+0.05%)</span>
           </div>
         </div>
       </footer>

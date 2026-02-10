@@ -23,10 +23,15 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
     { label: 'Assets', icon: 'layers', view: 'portfolioAssets' as const }
   ];
 
+  // VaR Gauges use CSS variables now. 
+  // Note: VaR is "Risk", usually negative/bad is RED. But in "Trend Color" logic, 
+  // if risk increases (bad), it aligns with "Down/Bad" -> Red in US, Green in CN? 
+  // Actually, Risk is always Bad. Let's keep VaR colors consistent with "Bad = Trend Down Color" 
+  // so the user knows what "Red" means in their context.
   const varGauges = [
-    { label: 'Daily VaR', val: '2.4%', color: '#0bda5e', offset: 180 },
-    { label: 'Weekly VaR', val: '8.1%', color: '#ffb347', offset: 100 },
-    { label: 'Monthly VaR', val: '14.2%', color: '#fa6238', offset: 40 }
+    { label: 'Daily VaR', val: '2.4%', color: 'var(--trend-up)', offset: 180 }, // Low risk = Good = Up Color
+    { label: 'Weekly VaR', val: '8.1%', color: '#ffb347', offset: 100 }, // Medium = Yellow
+    { label: 'Monthly VaR', val: '14.2%', color: 'var(--trend-down)', offset: 40 } // High Risk = Bad = Down Color
   ];
 
   return (
@@ -72,12 +77,12 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
             <div 
               key={item.label} 
               onClick={() => item.view && onNavigate(item.view)}
-              className={`group flex flex-col items-center gap-1 cursor-pointer transition-colors ${item.active ? 'text-[#fa6238]' : 'text-[#90a4cb] hover:text-white'}`}
+              className={`group flex flex-col items-center gap-1 cursor-pointer transition-colors ${item.active ? 'text-[var(--trend-down)]' : 'text-[#90a4cb] hover:text-white'}`}
             >
-              <div className={`p-2.5 rounded-xl ${item.active ? 'bg-[#fa6238] text-white shadow-[0_0_15px_rgba(250,98,56,0.3)]' : 'hover:bg-[#182234]'}`}>
+              <div className={`p-2.5 rounded-xl ${item.active ? 'bg-[var(--trend-down)] text-white shadow-[0_0_15px_rgba(250,98,56,0.3)]' : 'hover:bg-[#182234]'}`}>
                 <span className="material-symbols-outlined">{item.icon}</span>
               </div>
-              <span className={`text-[10px] font-bold uppercase tracking-tighter ${item.active ? 'text-[#fa6238]' : ''}`}>{item.label}</span>
+              <span className={`text-[10px] font-bold uppercase tracking-tighter ${item.active ? 'text-[var(--trend-down)]' : ''}`}>{item.label}</span>
             </div>
           ))}
           <div className="mt-auto flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
@@ -98,7 +103,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
             </div>
             <div className="flex gap-2">
               <button className="bg-[#182234] border border-[#222f49] px-4 py-2 rounded text-xs font-bold uppercase hover:bg-[#222f49] transition-colors text-white">Risk Report PDF</button>
-              <button className="bg-[#fa6238] px-4 py-2 rounded text-xs font-bold uppercase text-white shadow-lg shadow-[#fa6238]/20 hover:bg-[#fa6238]/90 transition-all">Emergency De-risk</button>
+              <button className="bg-[var(--trend-down)] px-4 py-2 rounded text-xs font-bold uppercase text-white shadow-lg shadow-[var(--trend-down)]/20 hover:opacity-90 transition-all">Emergency De-risk</button>
             </div>
           </div>
 
@@ -138,14 +143,14 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                 </div>
                 <div className="space-y-6 mt-4">
                   {[
-                    { label: 'CBOT (Chicago)', val: '88%', color: 'bg-[#fa6238]' },
+                    { label: 'CBOT (Chicago)', val: '88%', color: 'bg-[var(--trend-down)]' },
                     { label: 'ICE (Atlanta)', val: '42%', color: 'bg-[#0d59f2]' },
                     { label: 'MATIF (Paris)', val: '15%', color: 'bg-[#0d59f2]' }
                   ].map(row => (
                     <div key={row.label} className="space-y-2">
                       <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
                         <span className="text-white">{row.label}</span>
-                        <span className={row.val === '88%' ? 'text-[#fa6238]' : 'text-white'}>{row.val}</span>
+                        <span className={row.val === '88%' ? 'text-[var(--trend-down)]' : 'text-white'}>{row.val}</span>
                       </div>
                       <div className="h-2 w-full bg-[#222f49] rounded-full overflow-hidden">
                         <div className={`h-full ${row.color} transition-all duration-1000 ease-out`} style={{ width: row.val }}></div>
@@ -169,14 +174,14 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                 
                 <div className="h-[300px] w-full relative">
                   <svg className="w-full h-full opacity-60">
-                    <line stroke="#fa6238" strokeDasharray="4" strokeWidth="3" x1="20%" y1="30%" x2="50%" y2="50%" />
+                    <line stroke="var(--trend-down)" strokeDasharray="4" strokeWidth="3" x1="20%" y1="30%" x2="50%" y2="50%" />
                     <line stroke="#0d59f2" strokeWidth="1" x1="80%" y1="30%" x2="50%" y2="50%" />
                     <line stroke="#0d59f2" strokeWidth="2" x1="50%" y1="80%" x2="50%" y2="50%" />
-                    <line stroke="#0bda5e" strokeWidth="1" x1="20%" y1="30%" x2="80%" y2="30%" />
+                    <line stroke="var(--trend-up)" strokeWidth="1" x1="20%" y1="30%" x2="80%" y2="30%" />
                   </svg>
                   
                   <div className="absolute top-[30%] left-[20%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                    <div className="size-12 rounded-full bg-[#fa6238]/20 border-2 border-[#fa6238] flex items-center justify-center text-[10px] font-black shadow-[0_0_15px_rgba(250,98,56,0.2)]">CORN</div>
+                    <div className="size-12 rounded-full bg-[var(--trend-down)]/20 border-2 border-[var(--trend-down)] flex items-center justify-center text-[10px] font-black shadow-[0_0_15px_rgba(250,98,56,0.2)]">CORN</div>
                   </div>
                   <div className="absolute top-[30%] left-[80%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
                     <div className="size-10 rounded-full bg-[#0d59f2]/20 border-2 border-[#0d59f2] flex items-center justify-center text-[9px] font-black">WHEAT</div>
@@ -190,9 +195,9 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                 </div>
 
                 <div className="absolute bottom-6 left-6 text-[9px] font-black uppercase tracking-widest text-[#90a4cb] flex gap-4 bg-[#0a0c10]/40 p-2 rounded">
-                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#fa6238]"></span> Strong Positive</span>
+                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--trend-down)]"></span> Strong Correlation</span>
                   <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#0d59f2]"></span> Neutral</span>
-                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#0bda5e]"></span> Strong Negative</span>
+                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--trend-up)]"></span> Strong Negative</span>
                 </div>
               </div>
             </div>
@@ -207,7 +212,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                     { label: 'Sudden Drought (Brazil)', val: '-$420K', desc: 'Impact on Soybean futures due to supply shock and yield downward revisions.', color: getTrendColor(-420000, 'text') },
                     { label: 'Rate Hike (+50bps)', val: '+$112K', desc: 'USD strength impact on international export contracts hedging.', color: getTrendColor(112000, 'text') }
                   ].map((scenario, i) => (
-                    <div key={i} className={`p-3 bg-[#0a0c10]/40 border-l-4 rounded-r-lg group hover:bg-[#0a0c10] transition-colors`} style={{ borderLeftColor: scenario.color.includes('green') || scenario.color.includes('#0bda5e') ? '#0bda5e' : '#fa6238' }}>
+                    <div key={i} className={`p-3 bg-[#0a0c10]/40 border-l-4 rounded-r-lg group hover:bg-[#0a0c10] transition-colors`} style={{ borderLeftColor: 'var(--trend-down)' }}>
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-xs font-bold text-white uppercase tracking-tight">{scenario.label}</span>
                         <span className={`text-xs font-black ${scenario.color}`}>{scenario.val}</span>
@@ -237,7 +242,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white uppercase">Margin Call Alert</span>
-            <span className="text-[#fa6238] font-black">CBOT-22</span>
+            <span className="text-[var(--trend-down)] font-black">CBOT-22</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white uppercase">Drawdown</span>
@@ -245,7 +250,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-white uppercase">Liquidity Index</span>
-            <span className="text-[#0bda5e]">Healthy</span>
+            <span className="text-[var(--trend-up)]">Healthy</span>
           </div>
         </div>
       </footer>

@@ -1,11 +1,11 @@
 
 {
-  "description": "QuantAgrify Professional LTS - Version 2.9.8 (Nightly Snapshot). UI/UX Hardening: Model Genealogy scrolling fixed, AI Diagnostic messaging clarified, Multi-factor Regime feedback added. System Logic Stable.",
+  "description": "QuantAgrify Professional v3.0.0 (Chameleon Edition). CORE UI FREEZE. Implemented 'Chameleon' Dynamic Color System for instant US/CN trend toggling via CSS variables. Global State synchronization finalized across all 12 modules (Futures, Spot, Weather, Policy, Risk).",
   "requestFramePermissions": [
     "camera",
     "microphone",
     "geolocation"
   ],
-  "name": "QuantAgrify v2.9.8 Nightly",
-  "version": "2.9.8-snapshot"
+  "name": "QuantAgrify v3.0.0 Chameleon",
+  "version": "3.0.0-chameleon"
 }

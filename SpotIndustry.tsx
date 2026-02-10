@@ -759,7 +759,7 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                 <div className="flex-1 flex flex-col items-center justify-center relative">
                     {/* Dynamic Bell Curve */}
                     <svg className="w-full h-full" viewBox="0 0 200 100" preserveAspectRatio="none">
-                        <path d="M0,90 Q50,90 80,20 Q100,0 120,20 Q150,90 200,90" fill="none" stroke="#0bda5e" strokeWidth="2" />
+                        <path d="M0,90 Q50,90 80,20 Q100,0 120,20 Q150,90 200,90" fill="none" stroke="var(--trend-up)" strokeWidth="2" />
                         <line x1="100" y1="0" x2="100" y2="100" stroke="#314368" strokeDasharray="2 2" />
                         
                         {/* Dynamic Current Point based on Z-Score */}

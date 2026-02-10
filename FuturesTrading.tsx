@@ -267,7 +267,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
         {
             "sentiment_score": number (0-100, where 0 is super bearish, 100 super bullish),
             "bias": "BULLISH" | "BEARISH" | "NEUTRAL",
-            "summary": "Max 25 words summary explaining the primary driver (e.g., 'Heavy rain in Heilongjiang delaying harvest').",
+            "summary": "Max 25 words summary explaining the primary driver (e.g. 'Heavy rain in Heilongjiang delaying harvest').",
             "long_ratio": number (estimated percentage of market sentiment leaning long),
             "short_ratio": number (estimated percentage of market sentiment leaning short),
             "radar": {

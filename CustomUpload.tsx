@@ -220,6 +220,78 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       }
   };
 
+  // --- Test Data Generator ---
+  const generateTestCSV = () => {
+      const header = "Date,Open,High,Low,Close,Volume,OpenInterest";
+      const rows = [];
+      
+      const start = new Date("2023-01-01");
+      const end = new Date("2023-12-31");
+      const days = Math.floor((end.getTime() - start.getTime()) / (1000 * 3600 * 24));
+      
+      let price = 2600; // Base Corn Price
+      let vol = 300000;
+      let oi = 800000;
+      
+      for(let i=0; i<=days; i++) {
+          const d = new Date(start);
+          d.setDate(d.getDate() + i);
+          // Skip weekends
+          if (d.getDay() === 0 || d.getDay() === 6) continue;
+          
+          const dateStr = d.toISOString().split('T')[0];
+          const month = d.getMonth(); // 0-11
+          
+          // Seasonality Logic
+          let trend = 0;
+          let noise = (Math.random() - 0.5) * 15;
+          let volMult = 1.0;
+
+          // Q1: Stable
+          if (month < 4) { trend = (Math.random() - 0.45) * 2; }
+          // Q2: Planting (Uncertainty up)
+          else if (month < 6) { trend = (Math.random() - 0.4) * 5; volMult = 1.2; }
+          // Q3: Growing (Weather Market - The "Drought" Scenario)
+          else if (month < 8) { 
+              // Big Bull Run in June/July
+              if (month === 6) trend = (Math.random() + 0.2) * 10; // July spike
+              else trend = (Math.random() - 0.2) * 8;
+              noise = (Math.random() - 0.5) * 40; // High Vol
+              volMult = 2.0;
+          }
+          // Q4: Harvest (Pressure)
+          else if (month < 10) { 
+              trend = (Math.random() - 0.8) * 6; // Downward pressure
+              volMult = 1.5;
+          }
+          // End Year: Stabilization
+          else { trend = (Math.random() - 0.4) * 3; volMult = 0.8; }
+
+          price = price + trend + noise;
+          price = Math.max(2000, price); // Floor
+
+          const open = Math.round(price * (1 + (Math.random() - 0.5) * 0.01));
+          const close = Math.round(price);
+          const high = Math.round(Math.max(open, close) * (1 + Math.random() * 0.015));
+          const low = Math.round(Math.min(open, close) * (1 - Math.random() * 0.015));
+          
+          vol = Math.round(300000 * volMult * (0.8 + Math.random() * 0.4));
+          oi = Math.round(oi * (1 + (Math.random() - 0.5) * 0.01));
+
+          rows.push(`${dateStr},${open},${high},${low},${close},${vol},${oi}`);
+      }
+      
+      const csvContent = [header, ...rows].join("\n");
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", "DCE_Corn_Sim_2023.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  };
+
   // --- Dirty State Detection ---
   const activeFile = useMemo(() => library.find(f => f.id === selectedFileId), [library, selectedFileId]);
   
@@ -780,7 +852,7 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
                       open: s.open, 
                       high: s.high, 
                       low: s.low, 
-                      vol: s.volume,
+                      vol: s.volume, 
                       rationale: result.rationale 
                   }
               })),
@@ -949,6 +1021,13 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
               <p className="text-[#90a4cb] text-xs mt-1">Multi-modal data parsing • AI-Driven Classification • Neural Indexing</p>
             </div>
             <div className="flex gap-3">
+              <button 
+                onClick={generateTestCSV} 
+                className="flex items-center gap-2 rounded-lg bg-[#182234] border border-[#314368] px-4 py-2 text-xs font-bold uppercase text-[#90a4cb] hover:text-white hover:bg-[#222f49] transition-all"
+                title="Generate and Download DCE Corn 2023 Sim Data"
+              >
+                <span className="material-symbols-outlined text-lg">download</span> Sim Data (DCE Corn)
+              </button>
               <button 
                 onClick={() => fileInputRef.current?.click()}
                 className="flex items-center gap-2 rounded-lg bg-[#0d59f2] px-4 py-2 text-xs font-bold uppercase text-white hover:bg-[#1a66ff] transition-all shadow-lg shadow-[#0d59f2]/20"

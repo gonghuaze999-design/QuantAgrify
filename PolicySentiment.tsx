@@ -152,9 +152,6 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
                       // Reset push state because the asset changed
                       setIsPushed(false);
                   }
-              } else {
-                  // Optional: Show toast if mapping fails but context is set
-                  // setToast({ show: true, msg: `Global asset '${code}' maps to general Macro policy.` });
               }
           }
       }
@@ -353,16 +350,6 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
   };
 
   // --- Visual Helpers ---
-  const getBiasColor = (bias: string) => {
-      // Use getTrendColor with background and border classes
-      const base = getTrendColor(bias, 'text');
-      const bg = `bg-[${getTrendColor(bias, 'stroke')}]/10`;
-      const border = `border-[${getTrendColor(bias, 'stroke')}]/20`;
-      
-      if (bias === 'NEUTRAL') return 'text-slate-400 bg-slate-800/50 border-slate-700';
-      return `${base} ${bg} ${border}`;
-  };
-
   const handleDropdownChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
       const selectedId = e.target.value;
       const found = MORE_COMMODITIES.find(c => c.id === selectedId);
@@ -379,10 +366,10 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
       {/* Toast Notification */}
       {toast && (
           <div className="fixed bottom-24 right-6 z-[100] animate-in fade-in slide-in-from-right-4">
-              <div className="bg-[#182234] border border-[#fa6238] text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
-                  <span className="material-symbols-outlined text-[#fa6238]">info</span>
+              <div className="bg-[#182234] border border-[var(--trend-down)] text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm">
+                  <span className="material-symbols-outlined text-[var(--trend-down)]">info</span>
                   <div>
-                      <h4 className="text-xs font-bold text-[#fa6238] uppercase">Sync Limit</h4>
+                      <h4 className="text-xs font-bold text-[var(--trend-down)] uppercase">Sync Limit</h4>
                       <p className="text-[10px] text-slate-300 leading-tight">{toast.msg}</p>
                   </div>
                   <button onClick={() => setToast(null)} className="ml-auto text-slate-500 hover:text-white">
@@ -589,7 +576,11 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
                         <div className="p-6 border-b border-[#314368] bg-[#101622]">
                             <div className="flex justify-between items-start mb-4">
                                 <div>
-                                    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded border text-[10px] font-black uppercase tracking-widest mb-2 ${getBiasColor(selectedItem.tradeBias)}`}>
+                                    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded border text-[10px] font-black uppercase tracking-widest mb-2 ${
+                                        selectedItem.tradeBias === 'NEUTRAL' 
+                                        ? 'text-slate-400 bg-slate-800/50 border-slate-700' 
+                                        : `${getTrendColor(selectedItem.tradeBias, 'text')} bg-[${getTrendColor(selectedItem.tradeBias, 'stroke')}]/10 border-[${getTrendColor(selectedItem.tradeBias, 'stroke')}]/20`
+                                    }`}>
                                         <span className="material-symbols-outlined text-sm">
                                             {selectedItem.tradeBias === 'BULLISH' ? 'trending_up' : selectedItem.tradeBias === 'BEARISH' ? 'trending_down' : 'remove'}
                                         </span>

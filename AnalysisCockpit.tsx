@@ -1,5 +1,7 @@
+
 import React from 'react';
 import { SystemClock } from './SystemClock';
+import { getTrendColor } from './GlobalState';
 
 interface AnalysisCockpitProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -70,11 +72,11 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
           <div className="flex items-center gap-6 border-l border-[#222f49] pl-6">
             <div className="flex flex-col">
               <span className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-wider leading-none mb-1">Last Price</span>
-              <span className="text-sm font-medium text-white">462.25 <span className="text-[#0bda5e] font-bold text-xs">+1.24%</span></span>
+              <span className="text-sm font-medium text-white">462.25 <span className={`font-bold text-xs ${getTrendColor(1.24)}`}>+1.24%</span></span>
             </div>
             <div className="flex flex-col border-l border-[#222f49] pl-6">
               <span className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-wider leading-none mb-1">Volume (24h)</span>
-              <span className="text-sm font-medium text-white">32.4K <span className="text-[#fa6238] font-bold text-xs">-2.1%</span></span>
+              <span className="text-sm font-medium text-white">32.4K <span className={`font-bold text-xs ${getTrendColor(-2.1)}`}>-2.1%</span></span>
             </div>
           </div>
           <div className="h-6 w-px bg-[#222f49] mx-2"></div>
@@ -113,7 +115,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
             </div>
           ))}
           <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
-            <div className="p-2.5 rounded-xl hover:bg-red-500/10 transition-all"><span className="material-symbols-outlined">logout</span></div>
+            <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
             <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
           </div>
         </aside>
@@ -131,11 +133,11 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
           <div className="grid grid-cols-12 gap-6 auto-rows-max">
             {/* Action Card */}
             <div className="col-span-12 lg:col-span-8">
-              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-1 overflow-hidden shadow-[0_0_15px_rgba(11,218,94,0.1)] border-l-4 border-l-[#0bda5e]">
+              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-1 overflow-hidden shadow-[0_0_15px_rgba(11,218,94,0.1)] border-l-4" style={{borderLeftColor: 'var(--trend-up)'}}>
                 <div className="flex flex-col md:flex-row items-center gap-6 p-6">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
-                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#0bda5e] px-2 py-0.5 bg-[#0bda5e]/10 rounded border border-[#0bda5e]/20">Signal: Strong Buy</span>
+                      <span className={`text-[10px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded border ${getTrendColor('BULLISH', 'bg')}/10 ${getTrendColor('BULLISH')} border-current opacity-80`}>Signal: Strong Buy</span>
                       <span className="text-[10px] text-[#90a4cb] font-bold uppercase tracking-widest">Updated: UTC 14:22:10</span>
                     </div>
                     <h2 className="text-3xl font-black text-white mb-5 uppercase tracking-tight italic">Action: Open Long</h2>
@@ -150,11 +152,11 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                       </div>
                       <div className="flex flex-col border-l border-[#222f49] pl-6">
                         <span className="text-[10px] text-[#90a4cb] uppercase tracking-wider font-bold mb-1">Stop Loss</span>
-                        <span className="text-lg font-bold text-[#fa6238] tabular-nums">452.50</span>
+                        <span className={`text-lg font-bold tabular-nums ${getTrendColor('BEARISH')}`}>452.50</span>
                       </div>
                       <div className="flex flex-col border-l border-[#222f49] pl-6">
                         <span className="text-[10px] text-[#90a4cb] uppercase tracking-wider font-bold mb-1">Take Profit</span>
-                        <span className="text-lg font-bold text-[#0bda5e] tabular-nums">478.00</span>
+                        <span className={`text-lg font-bold tabular-nums ${getTrendColor('BULLISH')}`}>478.00</span>
                       </div>
                     </div>
                   </div>
@@ -179,9 +181,9 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   {[
-                    { label: 'Weather Impact', val: '+42%', color: '#0bda5e', width: '75%' },
-                    { label: 'Macro (USD)', val: '-12%', color: '#fa6238', width: '30%' },
-                    { label: 'Export Demand', val: '+28%', color: '#0bda5e', width: '55%' },
+                    { label: 'Weather Impact', val: '+42%', color: 'var(--trend-up)', width: '75%' },
+                    { label: 'Macro (USD)', val: '-12%', color: 'var(--trend-down)', width: '30%' },
+                    { label: 'Export Demand', val: '+28%', color: 'var(--trend-up)', width: '55%' },
                     { label: 'Supply Chain', val: 'Neutral', color: '#fff', width: '5%' }
                   ].map((factor, idx) => (
                     <div key={idx} className={`flex flex-col gap-2 p-3 rounded-xl border ${idx === 0 ? 'bg-[#0d59f2]/10 border-[#0d59f2]/30' : 'bg-[#0a0c10]/40 border-[#222f49]'}`}>
@@ -217,13 +219,13 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                     <line stroke="#222f49" strokeWidth="1" x1="0" x2="500" y1="50" y2="50" />
                     <line stroke="#222f49" strokeWidth="1" x1="0" x2="500" y1="100" y2="100" />
                     <line stroke="#222f49" strokeWidth="1" x1="0" x2="500" y1="150" y2="150" />
-                    <path d="M0 160 Q 50 150, 100 130 T 200 140 T 300 80 T 400 60 T 500 40" fill="none" stroke="#0bda5e" strokeWidth="3" />
-                    <path d="M500 40 L 520 30 L 540 35" fill="none" stroke="#0bda5e" strokeDasharray="4 4" strokeWidth="2" />
+                    <path d="M0 160 Q 50 150, 100 130 T 200 140 T 300 80 T 400 60 T 500 40" fill="none" stroke="var(--trend-up)" strokeWidth="3" />
+                    <path d="M500 40 L 520 30 L 540 35" fill="none" stroke="var(--trend-up)" strokeDasharray="4 4" strokeWidth="2" />
                     <path d="M0 160 Q 50 150, 100 130 T 200 140 T 300 80 T 400 60 T 500 40 V 200 H 0 Z" fill="url(#trendGradient)" />
                     <defs>
                       <linearGradient id="trendGradient" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor="#0bda5e" stopOpacity="0.1" />
-                        <stop offset="100%" stopColor="#0bda5e" stopOpacity="0" />
+                        <stop offset="0%" stopColor="var(--trend-up)" stopOpacity="0.1" />
+                        <stop offset="100%" stopColor="var(--trend-up)" stopOpacity="0" />
                       </linearGradient>
                     </defs>
                   </svg>
@@ -245,7 +247,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                     <span className="material-symbols-outlined text-[#0d59f2]">timeline</span>
                     Historical Equity Curve
                   </h3>
-                  <span className="text-xs font-black text-[#0bda5e] uppercase tracking-widest bg-[#0bda5e]/10 px-2 py-0.5 rounded border border-[#0bda5e]/20">Sharpe: 2.4</span>
+                  <span className={`text-xs font-black uppercase tracking-widest px-2 py-0.5 rounded border opacity-90 ${getTrendColor('BULLISH', 'text')} border-current bg-current/10`}>Sharpe: 2.4</span>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mb-8">
                   <div className="bg-[#0a0c10]/60 rounded-xl p-4 border border-[#222f49] shadow-inner">
@@ -254,7 +256,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                   </div>
                   <div className="bg-[#0a0c10]/60 rounded-xl p-4 border border-[#222f49] shadow-inner">
                     <span className="text-[10px] text-[#90a4cb] uppercase font-black tracking-widest block mb-1">Drawdown</span>
-                    <p className="text-2xl font-black text-[#fa6238] tabular-nums">-4.2%</p>
+                    <p className={`text-2xl font-black tabular-nums ${getTrendColor(-4.2)}`}>-4.2%</p>
                   </div>
                 </div>
                 <div className="h-44 w-full relative">
@@ -278,7 +280,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
         <aside className="w-80 border-l border-[#222f49] bg-[#101622] flex flex-col shrink-0 shadow-2xl relative z-40">
           <div className="p-5 border-b border-[#222f49] flex items-center justify-between bg-[#182234]/50">
             <div className="flex items-center gap-3">
-              <div className="size-2.5 bg-[#0bda5e] rounded-full animate-pulse shadow-[0_0_8px_#0bda5e]"></div>
+              <div className="size-2.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{backgroundColor: 'var(--trend-up)', color: 'var(--trend-up)'}}></div>
               <h3 className="text-xs font-black uppercase tracking-[0.2em] text-white italic">Quant AI Agent</h3>
             </div>
             <button className="material-symbols-outlined text-[#90a4cb] text-lg hover:text-white transition-colors">close_fullscreen</button>
@@ -328,14 +330,14 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
       <footer className="h-10 bg-[#0a0c10] border-t border-[#222f49] flex items-center px-6 fixed bottom-0 left-0 right-0 z-[60] overflow-hidden whitespace-nowrap shrink-0">
         <div className="flex items-center gap-4 border-r border-[#222f49] pr-6 mr-6 h-full">
            <span className="text-[10px] font-black text-[#90a4cb] uppercase tracking-[0.2em]">Live Pulse</span>
-           <div className="size-2 rounded-full bg-[#0bda5e] animate-pulse shadow-[0_0_8px_#0bda5e]"></div>
+           <div className="size-2 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{backgroundColor: 'var(--trend-up)', color: 'var(--trend-up)'}}></div>
         </div>
         <div className="flex gap-10 text-[11px] font-bold uppercase tracking-widest items-center">
-           <div className="flex items-center gap-2"><span className="text-white">CORN (ZC)</span> <span className="text-[#0bda5e] tabular-nums">462.25 (+1.2%)</span></div>
-           <div className="flex items-center gap-2"><span className="text-white">WHEAT (ZW)</span> <span className="text-[#fa6238] tabular-nums">542.75 (-0.8%)</span></div>
-           <div className="flex items-center gap-2"><span className="text-white">SOYBEANS (ZS)</span> <span className="text-[#0bda5e] tabular-nums">1,184.50 (+0.3%)</span></div>
-           <div className="flex items-center gap-2"><span className="text-white">USD INDEX (DXY)</span> <span className="text-[#0bda5e] tabular-nums">104.22 (+0.05%)</span></div>
-           <div className="flex items-center gap-2 opacity-40"><span className="text-white">CRUDE OIL</span> <span className="text-[#0bda5e] tabular-nums">74.22 (+0.4%)</span></div>
+           <div className="flex items-center gap-2"><span className="text-white">CORN (ZC)</span> <span className={`tabular-nums ${getTrendColor(1.2)}`}>462.25 (+1.2%)</span></div>
+           <div className="flex items-center gap-2"><span className="text-white">WHEAT (ZW)</span> <span className={`tabular-nums ${getTrendColor(-0.8)}`}>542.75 (-0.8%)</span></div>
+           <div className="flex items-center gap-2"><span className="text-white">SOYBEANS (ZS)</span> <span className={`tabular-nums ${getTrendColor(0.3)}`}>1,184.50 (+0.3%)</span></div>
+           <div className="flex items-center gap-2"><span className="text-white">USD INDEX (DXY)</span> <span className={`tabular-nums ${getTrendColor(0.05)}`}>104.22 (+0.05%)</span></div>
+           <div className="flex items-center gap-2 opacity-40"><span className="text-white">CRUDE OIL</span> <span className={`tabular-nums ${getTrendColor(0.4)}`}>74.22 (+0.4%)</span></div>
         </div>
       </footer>
 

@@ -53,6 +53,20 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
   const [endDate, setEndDate] = useState(GLOBAL_MARKET_CONTEXT.endDate);
   const [colorMode, setColorMode] = useState<'US' | 'CN'>(GLOBAL_MARKET_CONTEXT.colorMode);
 
+  // Apply color mode changes to CSS variables instantly
+  useEffect(() => {
+      const root = document.documentElement;
+      if (colorMode === 'CN') {
+          // CN: Red Up, Green Down
+          root.style.setProperty('--trend-up', '#fa6238'); // Red
+          root.style.setProperty('--trend-down', '#0bda5e'); // Green
+      } else {
+          // US: Green Up, Red Down (Default)
+          root.style.setProperty('--trend-up', '#0bda5e'); // Green
+          root.style.setProperty('--trend-down', '#fa6238'); // Red
+      }
+  }, [colorMode]);
+
   // Update Global State on change
   const handleContextUpdate = (key: 'code' | 'start' | 'end' | 'color', value: string) => {
       if (key === 'code') {

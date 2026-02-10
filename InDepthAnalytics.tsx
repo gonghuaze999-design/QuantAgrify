@@ -1,5 +1,7 @@
+
 import React from 'react';
 import { SystemClock } from './SystemClock';
+import { getTrendColor } from './GlobalState';
 
 interface InDepthAnalyticsProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -124,12 +126,14 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                 {heatmapData.flat().map((val, i) => {
                   const isPositive = val >= 0;
                   const absVal = Math.abs(val);
-                  const baseColor = isPositive ? 'bg-[#0d59f2]' : 'bg-[#fa6238]';
+                  // Use inline style for dynamic background color from CSS variable
+                  const bgColor = isPositive ? 'var(--trend-up)' : 'var(--trend-down)';
+                  
                   return (
                     <div 
                       key={i} 
-                      className={`aspect-square flex items-center justify-center text-[10px] font-bold rounded-sm ${baseColor} ${absVal > 0.5 ? 'text-white' : 'text-white/70'}`}
-                      style={{ opacity: 0.1 + absVal * 0.9 }}
+                      className={`aspect-square flex items-center justify-center text-[10px] font-bold rounded-sm ${absVal > 0.5 ? 'text-[#0a0c10]' : 'text-white/70'}`}
+                      style={{ backgroundColor: bgColor, opacity: 0.2 + absVal * 0.8 }}
                     >
                       {val.toFixed(2)}
                     </div>
@@ -145,19 +149,24 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                   <span className="material-symbols-outlined text-[#0d59f2]">analytics</span>
                   PnL Attribution (Waterfall)
                 </h3>
-                <span className="text-xs font-bold text-[#0bda5e] uppercase tracking-tighter">+14.2% Total</span>
+                <span className={`text-xs font-bold uppercase tracking-tighter ${getTrendColor(14.2)}`}>+14.2% Total</span>
               </div>
               <div className="h-48 w-full flex items-end gap-4 px-2">
                 {[
-                  { label: 'Weather', val: '30%', color: 'bg-[#0bda5e]/80', mb: '0%' },
-                  { label: 'Macro', val: '15%', color: 'bg-[#fa6238]/80', mb: '30%' },
-                  { label: 'Flow', val: '40%', color: 'bg-[#0bda5e]/80', mb: '15%' },
-                  { label: 'Final', val: '55%', color: 'bg-[#0d59f2]', mb: '0%', bold: true }
+                  { label: 'Weather', val: '30%', trend: 1, mb: '0%' },
+                  { label: 'Macro', val: '15%', trend: -1, mb: '30%' },
+                  { label: 'Flow', val: '40%', trend: 1, mb: '15%' },
+                  { label: 'Final', val: '55%', trend: 0, mb: '0%', bold: true } // Blue for final
                 ].map((bar, i) => (
                   <div key={i} className="flex-1 flex flex-col items-center">
                     <div 
-                      className={`w-full ${bar.color} rounded-t transition-all duration-500`} 
-                      style={{ height: bar.val, marginBottom: bar.mb }}
+                      className={`w-full rounded-t transition-all duration-500`} 
+                      style={{ 
+                          height: bar.val, 
+                          marginBottom: bar.mb,
+                          backgroundColor: bar.trend === 0 ? '#0d59f2' : (bar.trend > 0 ? 'var(--trend-up)' : 'var(--trend-down)'),
+                          opacity: bar.trend === 0 ? 1 : 0.8
+                      }}
                     ></div>
                     <span className={`text-[9px] mt-2 uppercase font-bold ${bar.bold ? 'text-white' : 'text-[#90a4cb]'}`}>{bar.label}</span>
                   </div>
@@ -174,7 +183,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                 </div>
                 <div className="text-center">
                   <p className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">Residual</p>
-                  <p className="text-sm font-bold text-[#fa6238]">-1.2%</p>
+                  <p className={`text-sm font-bold ${getTrendColor(-1.2)}`}>-1.2%</p>
                 </div>
               </div>
             </div>
@@ -223,109 +232,51 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                   </thead>
                   <tbody className="divide-y divide-[#222f49]">
                     {[
-                      { name: 'Corn (ZC)', wthr: '+0.82', macro: '-0.14', flow: '0.45', comp: 'Strong Buy', color: 'text-[#0bda5e]', bg: 'bg-[#0bda5e]/20' },
-                      { name: 'Wheat (ZW)', wthr: '-0.45', macro: '+0.32', flow: '0.12', comp: 'Sell', color: 'text-[#fa6238]', bg: 'bg-[#fa6238]/20' },
-                      { name: 'Soybeans (ZS)', wthr: '0.10', macro: '+0.55', flow: '0.89', comp: 'Accumulate', color: 'text-[#0d59f2]', bg: 'bg-[#0d59f2]/20' }
-                    ].map((row, i) => (
-                      <tr key={i} className="hover:bg-[#0d59f2]/5 transition-colors group">
-                        <td className="px-6 py-4 font-bold text-white uppercase">{row.name}</td>
-                        <td className={`px-6 py-4 font-bold ${row.wthr.startsWith('+') ? 'text-[#0bda5e]' : row.wthr.startsWith('-') ? 'text-[#fa6238]' : 'text-white'}`}>{row.wthr}</td>
-                        <td className={`px-6 py-4 font-bold ${row.macro.startsWith('+') ? 'text-[#0bda5e]' : row.macro.startsWith('-') ? 'text-[#fa6238]' : 'text-white'}`}>{row.macro}</td>
-                        <td className="px-6 py-4 text-white font-mono">{row.flow}</td>
-                        <td className="px-6 py-4">
-                          <span className={`${row.bg} ${row.color} px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-tight`}>{row.comp}</span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="material-symbols-outlined text-[#0d59f2] cursor-pointer group-hover:scale-110 transition-transform">open_in_new</span>
-                        </td>
-                      </tr>
-                    ))}
+                      { name: 'Corn (ZC)', wthr: '+0.82', macro: '-0.14', flow: '0.45', comp: 'Strong Buy', trend: 1 },
+                      { name: 'Wheat (ZW)', wthr: '-0.45', macro: '+0.32', flow: '0.12', comp: 'Sell', trend: -1 },
+                      { name: 'Soybeans (ZS)', wthr: '0.10', macro: '+0.55', flow: '0.89', comp: 'Accumulate', trend: 1 }
+                    ].map((row, i) => {
+                        const trendClass = getTrendColor(row.trend, 'text');
+                        const bgClass = `bg-[${getTrendColor(row.trend, 'stroke')}]/20`; // Using stroke color for BG base
+                        
+                        // For background we need to be careful with arbitrary values and vars.
+                        // We will use inline style for BG to ensure it picks up the var correctly.
+                        const bgStyle = { backgroundColor: row.trend > 0 ? 'var(--trend-up)' : 'var(--trend-down)', opacity: 0.2 };
+                        
+                        return (
+                          <tr key={i} className="hover:bg-[#0d59f2]/5 transition-colors group">
+                            <td className="px-6 py-4 font-bold text-white uppercase">{row.name}</td>
+                            <td className={`px-6 py-4 font-bold ${row.wthr.startsWith('+') ? 'text-[var(--trend-up)]' : row.wthr.startsWith('-') ? 'text-[var(--trend-down)]' : 'text-white'}`}>{row.wthr}</td>
+                            <td className={`px-6 py-4 font-bold ${row.macro.startsWith('+') ? 'text-[var(--trend-up)]' : row.macro.startsWith('-') ? 'text-[var(--trend-down)]' : 'text-white'}`}>{row.macro}</td>
+                            <td className="px-6 py-4 text-white font-mono">{row.flow}</td>
+                            <td className="px-6 py-4">
+                              <span 
+                                  className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-tight ${trendClass}`}
+                                  style={{ backgroundColor: row.trend > 0 ? 'rgba(var(--trend-up-rgb), 0.1)' : 'rgba(var(--trend-down-rgb), 0.1)' }} // Fallback if simple var doesn't work in bg
+                              >
+                                  {/* Actually, let's just use the var in a wrapper div if needed, or simple text color is enough for the badge text */}
+                                  <span className="relative z-10">{row.comp}</span>
+                                  {/* Simulated BG with opacity using box-shadow or absolute div is cleaner, but let's stick to text color for simplicity or inline style */}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="material-symbols-outlined text-[#0d59f2] cursor-pointer group-hover:scale-110 transition-transform">open_in_new</span>
+                            </td>
+                          </tr>
+                        );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
         </main>
-
-        {/* Quant AI Agent Sidebar */}
-        <aside className="w-80 border-l border-[#222f49] bg-[#101622] flex flex-col shrink-0">
-          <div className="p-4 border-b border-[#222f49] flex items-center justify-between bg-[#182234]/50">
-            <div className="flex items-center gap-2">
-              <div className="size-2 bg-[#0bda5e] rounded-full animate-pulse shadow-[0_0_8px_#0bda5e]"></div>
-              <h3 className="text-sm font-bold uppercase tracking-wider text-white">Quant AI Agent</h3>
-            </div>
-            <button className="material-symbols-outlined text-[#90a4cb] text-lg hover:text-white transition-colors">close_fullscreen</button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scrollbar">
-            <div className="flex flex-col gap-2 max-w-[90%]">
-              <div className="bg-[#182234] p-3 rounded-lg rounded-tl-none border border-white/5">
-                <p className="text-sm text-white leading-relaxed font-medium">The Factor Correlation Matrix indicates a high positive sensitivity (0.82) between Weather data and Yield projections for Corn. This suggests current drought patterns are heavily priced in.</p>
-              </div>
-              <span className="text-[10px] text-[#90a4cb] font-bold uppercase tracking-widest ml-1 leading-none">AI Assistant • 15:02</span>
-            </div>
-            <div className="flex flex-col gap-2 max-w-[90%] self-end">
-              <div className="bg-[#0d59f2]/20 border border-[#0d59f2]/30 p-3 rounded-lg rounded-tr-none">
-                <p className="text-sm text-white leading-relaxed font-medium">Why is Macro contributing negatively to the Corn PnL in the waterfall chart?</p>
-              </div>
-              <span className="text-[10px] text-[#90a4cb] font-bold uppercase tracking-widest mr-1 text-right leading-none">You • 15:05</span>
-            </div>
-            <div className="flex items-center gap-2 text-[#90a4cb] italic text-xs font-bold uppercase tracking-tighter">
-              <div className="flex gap-1">
-                <span className="size-1 bg-[#90a4cb] rounded-full animate-bounce"></span>
-                <span className="size-1 bg-[#90a4cb] rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                <span className="size-1 bg-[#90a4cb] rounded-full animate-bounce [animation-delay:0.4s]"></span>
-              </div>
-              Analyzing DXY correlation...
-            </div>
-          </div>
-          <div className="p-4 border-t border-[#222f49] flex flex-col gap-3 bg-[#182234]/20">
-            <div className="flex flex-wrap gap-2">
-              <button className="text-[10px] px-2 py-1 bg-[#182234] hover:bg-[#222f49] rounded border border-[#222f49] text-[#90a4cb] transition-colors font-bold uppercase tracking-widest">Factor Deep Dive</button>
-              <button className="text-[10px] px-2 py-1 bg-[#182234] hover:bg-[#222f49] rounded border border-[#222f49] text-[#90a4cb] transition-colors font-bold uppercase tracking-widest">Export Report</button>
-            </div>
-            <div className="relative">
-              <textarea 
-                className="w-full bg-[#182234] border border-[#222f49] rounded-lg text-sm text-white placeholder:text-[#90a4cb] focus:ring-1 focus:ring-[#0d59f2] focus:border-[#0d59f2] outline-none resize-none custom-scrollbar p-3 pr-10" 
-                placeholder="Ask AI about these charts..." 
-                rows={2}
-              ></textarea>
-              <button className="absolute right-2 bottom-3 p-1 text-[#0d59f2] hover:text-white transition-colors">
-                <span className="material-symbols-outlined">send</span>
-              </button>
-            </div>
-          </div>
-        </aside>
       </div>
-
-      {/* Footer Ticker */}
-      <footer className="h-8 bg-[#0a0c10] border-t border-[#222f49] flex items-center gap-8 px-6 overflow-hidden whitespace-nowrap shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-[#90a4cb] uppercase tracking-[0.2em]">Market Pulse:</span>
-        </div>
-        <div className="flex gap-8 text-[11px] font-bold items-center">
-          <div className="flex items-center gap-1.5">
-            <span className="text-white">CORN (ZC)</span>
-            <span className="text-[#0bda5e]">462.25 (+1.2%)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-white">WHEAT (ZW)</span>
-            <span className="text-[#fa6238]">542.75 (-0.8%)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-white">SOYBEANS (ZS)</span>
-            <span className="text-[#0bda5e]">1,184.50 (+0.3%)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-white">USD INDEX (DXY)</span>
-            <span className="text-[#0bda5e]">104.22 (+0.05%)</span>
-          </div>
-        </div>
-      </footer>
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #314368; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #222f49; border-radius: 10px; }
       `}</style>
     </div>
   );

@@ -26,7 +26,7 @@ interface ProcessingData {
     raw: number;
     adjusted: number;
     volume: number;
-    openInterest: number;
+    openInterest: number | null; // Changed to allow null for filtered data
     gapSize: number;
     // Fused Layer Value (For UI Visualization Compatibility)
     layerValue?: number; 
@@ -212,6 +212,15 @@ const processAndFusionData = (
             customIdx++;
         }
 
+        // C. Data Cleaning (New Robust Logic)
+        // Handle Rollover Anomalies where OI drops to near zero
+        let rawOI = rawData[i].open_interest || 0;
+        // Filter out extreme low values which cause huge spikes in Volume/OI ratio
+        // Using a threshold of 100 as a safe floor for most futures contracts
+        if (rawOI < 100) {
+            rawOI = null; 
+        }
+
         // C. Construct Wide Row
         const row: ProcessingData = {
             date: dateStr,
@@ -221,7 +230,7 @@ const processAndFusionData = (
             high: rawData[i].high,
             low: rawData[i].low,
             volume: rawData[i].volume || 0,
-            openInterest: rawData[i].open_interest || 0,
+            openInterest: rawOI, // Cleaned Value
             gapSize: gaps[i],
             
             // Fused Fields
@@ -540,6 +549,7 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
         
         setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [MERGE] Integrated ${fusedCount} external data dimensions.`]);
         setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ADJUST] Applied '${gapMethod}' to Price Series.`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [CLEAN] Sanitized low Open Interest outliers (Rollover Protection).`]);
 
         // 6. Validation & Completion
         setActiveStep(4);
@@ -831,7 +841,7 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
                                   <YAxis yAxisId="right" orientation="right" tick={{fill: '#fa6238', fontSize: 10}} axisLine={false} />
                                   <Tooltip contentStyle={{ backgroundColor: '#0a0e17', border: '1px solid #314368' }} itemStyle={{ fontSize: '11px', fontFamily: 'monospace' }} />
                                   <Bar yAxisId="right" dataKey="volume" fill="#475569" opacity={0.3} barSize={4} name="Volume" />
-                                  <Line yAxisId="right" type="monotone" dataKey="openInterest" stroke="#fa6238" strokeWidth={1.5} dot={false} name="Open Interest" />
+                                  <Line yAxisId="right" type="monotone" dataKey="openInterest" stroke="#fa6238" strokeWidth={1.5} dot={false} name="Open Interest" connectNulls={false} />
                                   <Line yAxisId="left" type="monotone" dataKey="adjusted" stroke="#0d59f2" strokeWidth={1} dot={false} name="Price" opacity={0.5} />
                               </ComposedChart>
                           </ResponsiveContainer>

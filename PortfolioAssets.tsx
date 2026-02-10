@@ -227,7 +227,9 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                       ].map((pos, i) => {
                           const pnlValue = parseFloat(pos.pnlPct.replace('%', ''));
                           const trendColor = getTrendColor(pnlValue, 'text');
-                          const trendColorBg = `bg-[${getTrendColor(pnlValue, 'stroke')}]/10 border-[${getTrendColor(pnlValue, 'stroke')}]/20`;
+                          // Calculate background trend color manually for Tailwind arbitrary values since getTrendColor handles text
+                          // For backgrounds, we use var(--trend-up/down) with opacity
+                          const trendBg = pnlValue >= 0 ? 'bg-[var(--trend-up)]/10 border-[var(--trend-up)]/20' : 'bg-[var(--trend-down)]/10 border-[var(--trend-down)]/20';
                           
                           return (
                             <tr key={i} className="hover:bg-white/[0.03] transition-colors group">

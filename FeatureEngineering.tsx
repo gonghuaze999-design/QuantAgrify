@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import {
-  LineChart,
+  ComposedChart,
   Line,
   BarChart,
   Bar,
@@ -11,13 +11,12 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ComposedChart,
-  Area,
-  Cell,
   ReferenceLine,
-  Legend
+  Legend,
+  Area,
+  Cell
 } from 'recharts';
-import { PROCESSED_DATASET, DATA_LAYERS, FEATURE_VIEW_CACHE } from './GlobalState';
+import { PROCESSED_DATASET, DATA_LAYERS, FEATURE_VIEW_CACHE, getTrendColor } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface FeatureEngineeringProps {
@@ -77,42 +76,55 @@ const QuantMath = {
         return QuantMath.rolling(returns, window, (slice) => QuantMath.std(slice) * Math.sqrt(252));
     },
 
-    // 3. RSI: Relative Strength Index
+    // 3. RSI: Relative Strength Index (UPGRADED to Wilder's Smoothing)
     rsi: (prices: number[], window: number = 14) => {
-        const gains: number[] = [];
-        const losses: number[] = [];
-        for (let i = 1; i < prices.length; i++) {
-            const diff = prices[i] - prices[i-1];
-            gains.push(diff > 0 ? diff : 0);
-            losses.push(diff < 0 ? Math.abs(diff) : 0);
-        }
-        // RSI requires specialized rolling average (Wilder's Smoothing usually, keeping simple SMA for robustness here)
-        const avgGain = QuantMath.rolling(gains, window, QuantMath.mean);
-        const avgLoss = QuantMath.rolling(losses, window, QuantMath.mean);
+        const rsiValues: (number | null)[] = [];
         
-        return prices.map((_, i) => {
-            if (i < window) return null;
-            const ag = avgGain[i-1];
-            const al = avgLoss[i-1];
-            
-            if (ag === null || al === null) return null;
-            if (al === 0) return 100;
-            
-            const rs = ag / al;
-            return 100 - (100 / (1 + rs));
-        });
+        let avgGain = 0;
+        let avgLoss = 0;
+
+        for (let i = 0; i < prices.length; i++) {
+            if (i === 0) {
+                rsiValues.push(null);
+                continue;
+            }
+
+            const change = prices[i] - prices[i - 1];
+            const gain = change > 0 ? change : 0;
+            const loss = change < 0 ? Math.abs(change) : 0;
+
+            if (i < window) {
+                avgGain += gain;
+                avgLoss += loss;
+                rsiValues.push(null);
+            } else if (i === window) {
+                avgGain = (avgGain + gain) / window;
+                avgLoss = (avgLoss + loss) / window;
+                
+                const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+                const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+                rsiValues.push(rsi);
+            } else {
+                avgGain = ((avgGain * (window - 1)) + gain) / window;
+                avgLoss = ((avgLoss * (window - 1)) + loss) / window;
+
+                const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+                const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+                rsiValues.push(rsi);
+            }
+        }
+        return rsiValues;
     },
 
     // 4. Term Structure Proxy (Liquidity Pressure)
     termStructureProxy: (vol: number[], oi: number[]) => {
         return vol.map((v, i) => {
-            if (oi[i] === 0 || oi[i] === null || isNaN(oi[i])) return null; // Return null if data missing
+            if (oi[i] === 0 || oi[i] === null || isNaN(oi[i]) || oi[i] < 100) return null; 
             return (v / oi[i]) * 100;
         });
     },
 
     // 5. External Data Pass-through (GEO Factors)
-    // Simply normalizes the fused layer data (e.g. GDD or Precip)
     externalSignal: (layerValues: (number | undefined)[]) => {
         return layerValues.map(v => (v === undefined || v === null || isNaN(v)) ? null : v);
     },
@@ -182,10 +194,9 @@ interface FactorDefinition {
 const FACTOR_TEMPLATES = [
   { id: 'mom_10', name: 'Momentum (10d)', category: 'MARKET', desc: '10-day price rate of change. Tracks trend persistence.', code: 'df["close"].pct_change(10)', params: { window: 10 } },
   { id: 'vol_20', name: 'Volatility (20d)', category: 'MARKET', desc: '20-day annualized vol. Measures market fear/uncertainty.', code: 'df["close"].pct_change().rolling(20).std() * sqrt(252)', params: { window: 20 } },
-  { id: 'rsi_14', name: 'RSI (14)', category: 'MARKET', desc: 'Relative Strength Index. Detects overbought/oversold conditions.', code: 'ta.RSI(df["close"], timeperiod=14)', params: { window: 14 } },
-  { id: 'liq_pressure', name: 'Liquidity Pressure', category: 'MARKET', desc: 'Vol/OI Ratio. Indicates speculative heat vs hedging.', code: 'df["volume"] / df["open_interest"]', params: {} },
+  { id: 'rsi_14', name: 'RSI (14)', category: 'MARKET', desc: 'Wilder\'s RSI. Detects overbought/oversold conditions.', code: 'ta.RSI(df["close"], timeperiod=14)', params: { window: 14 } },
+  { id: 'liq_pressure', name: 'Liquidity Pressure', category: 'MARKET', desc: 'Vol/OI Ratio. Filtered for rollover spikes.', code: 'df["volume"] / df["open_interest"]', params: {} },
   { id: 'basis_mom', name: 'Basis Momentum', category: 'FUNDAMENTAL', desc: 'Change rate of (Spot - Future). Signals supply tightness.', code: '(df["spot"] - df["close"]).diff(5)', params: { window: 5 } },
-  // Restored GEO Factors
   { id: 'geo_gdd', name: 'GDD Accumulation', category: 'GEO', desc: 'Cumulative Growing Degree Days. Requires fused Weather Layer.', code: 'df["layer_value"].cumsum()', params: {} },
   { id: 'geo_raw', name: 'Raw External Signal', category: 'GEO', desc: 'Direct mapping of fused external layer (e.g. NDVI/Soil).', code: 'df["layer_value"]', params: {} },
 ];
@@ -226,14 +237,13 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   const [isAuditing, setIsAuditing] = useState(false);
   const [aiAudit, setAiAudit] = useState<{ analysis: string; score: number; verdict: 'PASS' | 'FAIL' | 'NEUTRAL' } | null>(null);
 
-  // Global Tooltip State (Fixed Position)
   const [globalTooltip, setGlobalTooltip] = useState<{x: number, y: number, text: string} | null>(null);
 
   // Computed Metrics State
   const [metrics, setMetrics] = useState({ ic: 0, ir: 0, autocorr: 0, turnover: 0 });
   const [quantileData, setQuantileData] = useState<any[]>([]);
 
-  // Calculation Cache (Persists calculations across selection changes within component lifecycle)
+  // Calculation Cache
   const calculationCache = useRef<Record<string, CalculationCacheItem>>({});
 
   // --- 1. Load Data & Persistence Logic ---
@@ -282,13 +292,11 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   const computeFactorValues = (prices: number[], volumes: number[], oi: number[], layerValues: (number|undefined)[], tmplId: string) => {
       if (tmplId === 'mom_10') return QuantMath.momentum(prices, 10);
       else if (tmplId === 'vol_20') return QuantMath.volatility(prices, 20);
-      else if (tmplId === 'rsi_14') return QuantMath.rsi(prices, 14);
-      else if (tmplId === 'liq_pressure') return QuantMath.termStructureProxy(volumes, oi);
+      else if (tmplId === 'rsi_14') return QuantMath.rsi(prices, 14); 
+      else if (tmplId === 'liq_pressure') return QuantMath.termStructureProxy(volumes, oi); 
       else if (tmplId === 'basis_mom') return QuantMath.momentum(prices, 5).map(v => v ? -v : null); 
-      // GEO Handling
       else if (tmplId === 'geo_raw') return QuantMath.externalSignal(layerValues);
       else if (tmplId === 'geo_gdd') {
-          // Accumulate the layer values (assuming layerValues are daily GDD)
           let sum = 0;
           return layerValues.map(v => {
               if (v === undefined || v === null || isNaN(v)) return null;
@@ -296,7 +304,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
               return sum;
           });
       }
-      // STRICT: Return NULL for unknown or uncalculable factors. No Simulation.
       else return prices.map(() => null); 
   };
 
@@ -316,18 +323,13 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       const prices = activeDataset.data.map((d: any) => d.adjusted);
       const volumes = activeDataset.data.map((d: any) => d.volume);
       const oi = activeDataset.data.map((d: any) => d.openInterest);
-      // Extract fused layer data (if present)
       const layerValues = activeDataset.data.map((d: any) => d.layerValue);
       
       let tId = templateId;
       if (!tId) {
           const f = activeFactors.find(f => f.id === factorId);
           if (f && f.source === 'TEMPLATE') {
-              // FIX: Correctly reconstruct template ID from complex ID format f_TEMPLATEID_TIMESTAMP
-              // Example: f_rsi_14_12345 -> split -> ['f', 'rsi', '14', '12345'] -> slice(1, 3) -> join -> 'rsi_14'
               const parts = f.id.split('_');
-              // Assuming standard format f_{part1}_{part2}_{timestamp} or f_{part1}_{part2}_{part3}_{timestamp}
-              // We grab everything between first 'f' and last 'timestamp'
               if (parts.length >= 3) {
                   tId = parts.slice(1, parts.length - 1).join('_');
               }
@@ -352,7 +354,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       const qRets = QuantMath.calculateQuantileReturns(factorValues, fwdReturns);
       
       let autocorr = 0;
-      // Calculate autocorrelation only on valid non-null sequences
       const validFactors = factorValues.filter(v => v !== null) as number[];
       if (validFactors.length > 2) {
           const f0 = validFactors.slice(0, -1);
@@ -412,16 +413,8 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
             You are a Quant Developer. Convert this request into a Factor Definition JSON.
             Request: "${aiPrompt}"
             Target: Agri-Commodity Futures (Pandas DataFrame 'df').
-            Columns: open, high, low, close, volume, open_interest.
             
-            Return JSON:
-            {
-                "name": "Short Name",
-                "category": "MARKET" | "GEO" | "FUNDAMENTAL",
-                "description": "Explanation",
-                "code_snippet": "Python pandas code expression",
-                "params": {}
-            }
+            Return JSON: { "name": "Short Name", "category": "MARKET", "description": "Explanation", "code_snippet": "Python pandas code", "params": {} }
           `;
           
           const result = await ai.models.generateContent({
@@ -467,26 +460,16 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       
       const prompt = `
         Role: Senior Quantitative Researcher.
-        Task: Audit the validity of this Alpha Factor.
+        Audit this Alpha Factor.
         
-        Factor Info:
-        - Name: ${activeFactor.name}
-        - Description: ${activeFactor.description}
-        - Logic Code: ${activeFactor.code_snippet}
+        Factor: ${activeFactor.name}
+        Code: ${activeFactor.code_snippet}
         
-        Performance Metrics (Backtest):
-        - IC (Predictive Power): ${metrics.ic.toFixed(4)}
-        - IR (Stability): ${metrics.ir.toFixed(2)}
-        - Auto-Correlation: ${metrics.autocorr.toFixed(2)}
-        - Quantile Monotonicity: ${JSON.stringify(quantileData.map(q => q.ret.toFixed(2) + '%'))}
+        Metrics:
+        - IC: ${metrics.ic.toFixed(4)}
+        - IR: ${metrics.ir.toFixed(2)}
         
-        Analyze if the logic matches the user intent and if the metrics support the hypothesis.
-        Return JSON:
-        {
-            "analysis": "2 sentence expert commentary on validity and logic-fit.",
-            "score": number (0-100),
-            "verdict": "PASS" | "FAIL" | "NEUTRAL"
-        }
+        Return JSON: { "analysis": "...", "score": number, "verdict": "PASS"|"FAIL" }
       `;
 
       try {
@@ -512,15 +495,14 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   const handlePushToFusion = () => {
       if (!activeDataset || activeFactors.length === 0) return;
 
-      // Ensure data includes OPEN INTEREST and FULL OHLCV for Risk Module
       const fusionData = activeDataset.data.map((d: any) => ({
           date: d.date,
-          open: d.raw, // Original price (close usually), map robustly
-          high: d.high || d.raw, // Fallback if missing
+          open: d.raw, 
+          high: d.high || d.raw, 
           low: d.low || d.raw,
           close: d.adjusted,
           volume: d.volume,
-          open_interest: d.openInterest // CRITICAL FIX: Include OI
+          open_interest: d.openInterest 
       }));
 
       const prices = activeDataset.data.map((d: any) => d.adjusted);
@@ -533,8 +515,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       activeFactors.forEach(factor => {
           let tId = undefined;
           if (factor.source === 'TEMPLATE') {
-              // FIX: Robust ID Parsing for Push Logic
-              // Correctly reconstruct 'rsi_14', 'mom_10' etc from 'f_rsi_14_171...'
               const parts = factor.id.split('_');
               if (parts.length >= 3) {
                   tId = parts.slice(1, parts.length - 1).join('_');
@@ -765,7 +745,6 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                                                 key={f.id}
                                                 onClick={() => { 
                                                     setSelectedFactorId(f.id); 
-                                                    // Use fix here too just in case
                                                     const parts = f.id.split('_');
                                                     const tmplId = f.source === 'TEMPLATE' && parts.length >= 3 ? parts.slice(1, parts.length - 1).join('_') : undefined;
                                                     calculateFactor(f.id, tmplId); 
@@ -851,18 +830,17 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                             </div>
                         </div>
 
-                        {/* 2. Quantile Returns */}
+                        {/* 2. Quantile Returns - WITH TREND COLOR */}
                         <div className="bg-[#182234] border border-[#222f49] rounded-xl p-4">
-                            <h4 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest mb-3">Grouped Returns (Monotonicity)</h4>
-                            <div className="h-32 w-full">
+                            <h4 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest mb-3">Quantile Monotonicity</h4>
+                            <div className="h-32">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={quantileData}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#222f49" vertical={false} />
-                                        <XAxis dataKey="group" tick={{fill: '#90a4cb', fontSize: 9}} axisLine={false} tickLine={false} />
+                                        <XAxis dataKey="group" tick={{fill: '#90a4cb', fontSize: 9}} tickLine={false} axisLine={false} />
                                         <Tooltip cursor={{fill: 'transparent'}} contentStyle={{ backgroundColor: '#0a0e17', border: '1px solid #314368', fontSize: '10px' }} />
                                         <Bar dataKey="ret" radius={[2, 2, 0, 0]}>
                                             {quantileData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={entry.ret > 0 ? '#0bda5e' : '#fa6238'} />
+                                                <Cell key={`cell-${index}`} fill={entry.ret > 0 ? 'var(--trend-up)' : 'var(--trend-down)'} />
                                             ))}
                                         </Bar>
                                     </BarChart>
@@ -870,86 +848,55 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                             </div>
                         </div>
 
-                        {/* 3. Turnover/Autocorr */}
-                        <div className="bg-[#182234] border border-[#222f49] rounded-xl p-4 space-y-3 group relative">
-                            <div>
-                                <div className="flex justify-between text-[10px] uppercase font-bold text-[#90a4cb] mb-1 cursor-help">
-                                    <span 
-                                        className="flex items-center gap-1"
-                                        onMouseEnter={(e) => handleTooltip(e, 'Persistence of the signal. High (>0.9) means low turnover (good for costs). Low means high churn.')}
-                                        onMouseLeave={() => setGlobalTooltip(null)}
-                                    >
-                                        Autocorrelation (1D)
-                                        <span className="material-symbols-outlined text-[10px]">info</span>
-                                    </span>
-                                    <span className="text-white">{metrics.autocorr.toFixed(2)}</span>
-                                </div>
-                                <div className="w-full h-1 bg-[#101622] rounded-full overflow-hidden">
-                                    <div className="h-full bg-[#ffb347]" style={{ width: `${Math.abs(metrics.autocorr) * 100}%` }}></div>
-                                </div>
+                        {/* 3. AI Audit */}
+                        <div className="bg-[#182234] border border-[#222f49] rounded-xl p-4 relative overflow-hidden">
+                            <div className="flex justify-between items-center mb-3">
+                                <h4 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest">Logic Audit</h4>
+                                {aiAudit && (
+                                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
+                                        aiAudit.verdict === 'PASS' ? 'text-[#0bda5e] border-[#0bda5e]/30 bg-[#0bda5e]/10' :
+                                        aiAudit.verdict === 'FAIL' ? 'text-[#fa6238] border-[#fa6238]/30 bg-[#fa6238]/10' :
+                                        'text-slate-400 border-slate-600 bg-slate-800'
+                                    }`}>{aiAudit.verdict}</span>
+                                )}
                             </div>
-                            <p className="text-[9px] text-slate-500 italic">
-                                {metrics.autocorr > 0.9 ? 'High persistence (Low turnover)' : metrics.autocorr < 0.5 ? 'High churn (High transaction costs)' : 'Balanced signal'}
-                            </p>
-                        </div>
-
-                        {/* 4. AI Factor Audit */}
-                        <div className="border-t border-[#314368] pt-4 mt-2">
-                            <h3 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest mb-3 flex items-center gap-2">
-                                <span className="material-symbols-outlined text-sm text-[#0d59f2]">smart_toy</span>
-                                AI Factor Audit
-                            </h3>
-                            {aiAudit ? (
-                                <div className={`p-3 rounded-lg border text-left animate-in fade-in ${aiAudit.verdict === 'PASS' ? 'bg-[#0bda5e]/10 border-[#0bda5e]/30' : aiAudit.verdict === 'FAIL' ? 'bg-[#fa6238]/10 border-[#fa6238]/30' : 'bg-[#182234] border-[#314368]'}`}>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${aiAudit.verdict === 'PASS' ? 'bg-[#0bda5e] text-black' : aiAudit.verdict === 'FAIL' ? 'bg-[#fa6238] text-white' : 'bg-slate-600 text-white'}`}>
-                                            {aiAudit.verdict}
-                                        </span>
-                                        <span className="text-[9px] font-bold text-white">Score: {aiAudit.score}/100</span>
+                            
+                            <div className="min-h-[80px] text-[10px] text-slate-300 leading-relaxed">
+                                {isAuditing ? (
+                                    <div className="flex items-center gap-2 text-[#90a4cb] py-4">
+                                        <span className="material-symbols-outlined text-sm animate-spin">sync</span>
+                                        Reviewing code logic & metrics...
                                     </div>
-                                    <p className="text-[10px] leading-relaxed text-slate-200">
-                                        {aiAudit.analysis}
-                                    </p>
-                                    <button onClick={handleRunAudit} disabled={isAuditing} className="mt-2 w-full text-[9px] uppercase font-bold text-[#90a4cb] hover:text-white flex items-center justify-center gap-1 py-1 bg-black/20 rounded">
-                                        <span className={`material-symbols-outlined text-[10px] ${isAuditing ? 'animate-spin' : ''}`}>refresh</span> Re-Audit
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="text-center p-4 bg-[#182234] rounded-xl border border-[#314368] border-dashed">
-                                    <span className="material-symbols-outlined text-[#90a4cb] text-2xl mb-2">fact_check</span>
-                                    <p className="text-[10px] text-[#90a4cb] mb-3">Evaluate factor logic vs performance.</p>
-                                    <button 
-                                        onClick={handleRunAudit}
-                                        disabled={isAuditing || !selectedFactorId}
-                                        className="px-3 py-1.5 bg-[#0d59f2] text-white rounded text-[10px] font-bold uppercase hover:bg-[#1a66ff] disabled:opacity-50"
-                                    >
-                                        {isAuditing ? 'Auditing...' : 'Run Audit'}
-                                    </button>
-                                </div>
-                            )}
+                                ) : aiAudit ? (
+                                    aiAudit.analysis
+                                ) : (
+                                    <span className="text-[#90a4cb] italic">Select a factor to run AI logic check...</span>
+                                )}
+                            </div>
+
+                            <button 
+                                onClick={handleRunAudit}
+                                disabled={isAuditing || !selectedFactorId}
+                                className="w-full mt-3 py-2 bg-[#101622] hover:bg-[#0d59f2] border border-[#314368] rounded text-[10px] font-bold uppercase text-white transition-all disabled:opacity-50"
+                            >
+                                Run Expert Review
+                            </button>
                         </div>
                     </div>
                 </div>
             </div>
+
+            {/* Global Tooltip */}
+            {globalTooltip && (
+                <div 
+                    className="fixed z-50 bg-[#0a0e17] border border-[#314368] text-white text-[10px] px-3 py-2 rounded shadow-xl pointer-events-none max-w-[200px]"
+                    style={{ left: globalTooltip.x, top: globalTooltip.y, transform: 'translateX(-50%)' }}
+                >
+                    {globalTooltip.text}
+                </div>
+            )}
         </main>
       </div>
-
-      {globalTooltip && (
-        <div 
-            className="fixed z-[9999] bg-[#0a0e17] border border-[#314368] p-3 rounded-lg text-[10px] text-slate-200 pointer-events-none max-w-[200px] shadow-2xl animate-in fade-in zoom-in-95 duration-100"
-            style={{ left: globalTooltip.x, top: globalTooltip.y, transform: 'translateX(-50%)' }}
-        >
-            {globalTooltip.text}
-        </div>
-      )}
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #101622; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #314368; border-radius: 10px; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </div>
   );
 };

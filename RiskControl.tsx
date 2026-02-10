@@ -13,7 +13,7 @@ import {
   ReferenceLine,
   Cell
 } from 'recharts';
-import { DATA_LAYERS, CompositeSignalPackage, RISK_VIEW_CACHE } from './GlobalState';
+import { DATA_LAYERS, CompositeSignalPackage, RISK_VIEW_CACHE, getTrendColor } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface RiskControlProps {
@@ -330,7 +330,7 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
                                     onChange={(e) => setStopLossMult(parseFloat(e.target.value))}
                                     className="w-24 h-1.5 bg-[#0a0c10] rounded-lg appearance-none cursor-pointer accent-[#fa6238]"
                                 />
-                                <span className="text-[9px] text-[#fa6238] font-bold mt-1">{stopLossMult}x</span>
+                                <span className={`text-[9px] font-bold mt-1 ${getTrendColor(-1)}`}>{stopLossMult}x</span>
                             </div>
 
                             <div className="flex flex-col items-center shrink-0">
@@ -395,7 +395,7 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
                                                 <Tooltip contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368' }} />
                                                 <Area type="monotone" dataKey="upper" stroke="none" fill="#0d59f2" fillOpacity={0.1} />
                                                 <Line type="monotone" dataKey="price" stroke="#ffffff" strokeWidth={1} dot={false} />
-                                                <Line type="monotone" dataKey="lower" stroke="#fa6238" strokeWidth={1} dot={false} strokeDasharray="3 3" />
+                                                <Line type="monotone" dataKey="lower" stroke="var(--trend-down)" strokeWidth={1} dot={false} strokeDasharray="3 3" />
                                             </ComposedChart>
                                         </ResponsiveContainer>
                                     </div>
@@ -405,20 +405,20 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
                                 <div className="flex-1 bg-[#101622] border border-[#222f49] rounded-xl p-4 flex flex-col min-h-[200px]">
                                     <div className="flex justify-between items-center mb-2">
                                         <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
-                                            <span className="material-symbols-outlined text-[#fa6238] text-sm">waves</span>
+                                            <span className="material-symbols-outlined text-sm" style={{color: 'var(--trend-down)'}}>waves</span>
                                             Drawdown Tunnel
                                         </h3>
-                                        <span className="text-[10px] text-[#fa6238]">Limit: 10%</span>
+                                        <span className="text-[10px]" style={{color: 'var(--trend-down)'}}>Limit: 10%</span>
                                     </div>
                                     <div className="flex-1 w-full min-h-0">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <ComposedChart data={riskData}>
                                                 <CartesianGrid strokeDasharray="3 3" stroke="#222f49" vertical={false} />
                                                 <XAxis hide />
-                                                <YAxis tick={{fill: '#fa6238', fontSize: 10}} axisLine={false} tickLine={false} />
+                                                <YAxis tick={{fill: 'var(--trend-down)', fontSize: 10}} axisLine={false} tickLine={false} />
                                                 <Tooltip contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368' }} />
-                                                <ReferenceLine y={-0.10} stroke="#fa6238" strokeDasharray="3 3" label="Hard Stop" />
-                                                <Area type="monotone" dataKey="drawdown" stroke="#fa6238" fill="#fa6238" fillOpacity={0.2} />
+                                                <ReferenceLine y={-0.10} stroke="var(--trend-down)" strokeDasharray="3 3" label="Hard Stop" />
+                                                <Area type="monotone" dataKey="drawdown" stroke="var(--trend-down)" fill="var(--trend-down)" fillOpacity={0.2} />
                                             </ComposedChart>
                                         </ResponsiveContainer>
                                     </div>
@@ -437,14 +437,14 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
                                     </div>
                                     <div className="bg-[#182234] border border-[#222f49] p-3 rounded-lg flex flex-col justify-center">
                                         <span className="text-[8px] text-[#90a4cb] uppercase font-bold mb-1">Max DD</span>
-                                        <span className="text-xl font-black text-[#0bda5e]">{metrics.maxDD}%</span>
+                                        <span className="text-xl font-black" style={{color: 'var(--trend-down)'}}>{metrics.maxDD}%</span>
                                     </div>
                                     <div className="bg-[#182234] border border-[#222f49] p-3 rounded-lg flex flex-col justify-center items-center">
                                         <span className="text-[8px] text-[#90a4cb] uppercase font-bold mb-1">Liq. Score</span>
                                         {metrics.liquidityScore > 80 ? (
-                                            <span className="material-symbols-outlined text-[#0bda5e] text-2xl">check_circle</span>
+                                            <span className="material-symbols-outlined text-2xl text-[#0bda5e]">check_circle</span>
                                         ) : (
-                                            <span className="material-symbols-outlined text-[#fa6238] text-2xl">warning</span>
+                                            <span className="material-symbols-outlined text-2xl text-[#fa6238]">warning</span>
                                         )}
                                         <span className="text-[10px] font-bold text-white mt-1">{metrics.liquidityScore}/100</span>
                                     </div>
