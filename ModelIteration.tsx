@@ -84,6 +84,7 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
   // --- STATE ---
   const [versions, setVersions] = useState<ModelVersion[]>(SESSION_VERSIONS);
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
+  const [showBenchmark, setShowBenchmark] = useState(false); // Toggle state for baseline
   
   // AI Optimizer State
   const [aiAnalysis, setAiAnalysis] = useState<{ loading: boolean, text: string, suggestions: string[] }>({ 
@@ -163,12 +164,16 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
       const timeSeries = activeModel.package.timeSeries;
       const len = timeSeries.length;
       
-      // Correcting the benchmark calculation to be cumulative
+      // Benchmarking: Simple Buy & Hold (Cumulative)
+      // Correct logic: Start at 1000, apply daily % changes of the underlying price
       let benchEquity = 1000;
+      const initialPrice = timeSeries[0]?.price || 1;
 
       const data = timeSeries.map((d, i) => {
-          const dailyRet = d.benchmarkReturn || 0;
-          if (i > 0) benchEquity = benchEquity * (1 + dailyRet);
+          if (i > 0) {
+              // Calculate benchmark based on price action relative to start
+              benchEquity = 1000 * (d.price / initialPrice);
+          }
 
           return {
             date: d.date,
@@ -184,6 +189,7 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
   const attributionData = useMemo(() => {
       if (!activeModel || !activeModel.package.attribution) return [];
       const weights = activeModel.package.attribution.weights;
+      if (!weights) return [];
       return Object.entries(weights).map(([name, weight]) => ({
           name, 
           weight: parseFloat((Number(weight) * 100).toFixed(1))
@@ -218,6 +224,19 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
       if (!activeModel || !process.env.API_KEY) return;
       setAiAnalysis(prev => ({ ...prev, loading: true, text: "Running diagnostic scan..." }));
 
+      // FIX: Check for Flatline OR Holy Grail
+      const curve = activeModel.package.timeSeries.map(d => d.equity);
+      const stdDev = QuantMath.std(curve);
+      const isFlatline = stdDev < 0.001; 
+      const isHolyGrail = activeModel.metrics.sharpe > 8.0; 
+      
+      let systemNote = "Analyze standard performance.";
+      if (isFlatline) {
+          systemNote = "CRITICAL ALERT: The equity curve is completely flat (Standard Deviation ~ 0). This indicates NO TRADES were executed. Diagnose as 'Data Starvation' or 'Signal Failure'.";
+      } else if (isHolyGrail) {
+          systemNote = "CRITICAL ALERT: Sharpe Ratio > 8.0. This is statistically impossible in real markets. It suggests 'Lookahead Bias' (using future data) or the test dataset is too simple. Diagnose as 'Model Rejected'.";
+      }
+
       const prompt = `
         Role: Quant Fund Portfolio Manager.
         Task: Analyze the performance of Model Version ${activeModel.id}.
@@ -228,13 +247,15 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
         - Max Drawdown: ${activeModel.metrics.maxDD}%
         - IS/OOS Drift (Overfitting Risk): ${activeModel.metrics.oosDrift} (Lower is better)
         
+        System Note: ${systemNote}
+        
         Factor Weights:
         ${attributionData.map(d => `${d.name}: ${d.weight}%`).join(', ')}
         
         Provide:
-        1. A strict diagnostic assessment (Pass/Fail/Warn).
-        2. Specifically identify if the model is overfitting based on the Drift score.
-        3. Suggest 3 concrete parameter changes for the next iteration (e.g., "Increase Stop Loss multiplier to 2.5x").
+        1. A professional diagnostic assessment title (e.g. 'Underperforming - High Volatility' or 'Stable - Ready for Scale'). Do not use single words like 'FAIL'.
+        2. Specifically interpret why the chart looks the way it does.
+        3. Suggest 3 concrete parameter changes for the next iteration.
         
         Return JSON:
         {
@@ -267,7 +288,6 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
 
   const deployToCockpit = () => {
       if (!activeModel) return;
-      // In a real app, this would persist the strategy config to the trading engine.
       alert(`Model ${activeModel.id} deployed to Live Cockpit environment.`);
       onNavigate('cockpit');
   };
@@ -311,7 +331,7 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar Nav */}
         <aside className="w-64 border-r border-[#222f49] bg-[#101622] flex flex-col shrink-0">
-          <div className="p-6">
+          <div className="p-6 shrink-0">
             <p className="text-xs font-bold uppercase tracking-widest text-[#90a4cb] mb-4">Pipeline Layers</p>
             <nav className="flex flex-col gap-2">
               {pipelineLayers.map((layer) => (
@@ -331,33 +351,39 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
             </nav>
           </div>
           
-          <div className="mt-auto p-6 border-t border-[#222f49]">
-            <h3 className="text-[10px] font-bold text-[#90a4cb] uppercase tracking-widest mb-4">Model Genealogy</h3>
+          {/* UPDATED: Elastic container with scrollbar for Genealogy */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 border-t border-[#222f49] min-h-0">
+            <h3 className="text-[10px] font-bold text-[#90a4cb] uppercase tracking-widest mb-4 sticky top-0 bg-[#101622] py-2 z-10">Model Genealogy</h3>
             <div className="space-y-2">
                 {versions.map(v => (
                     <div 
                         key={v.id} 
                         onClick={() => setActiveVersionId(v.id)}
-                        className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                        className={`p-3 rounded-lg border cursor-pointer transition-all relative overflow-hidden group ${
                             activeVersionId === v.id 
-                            ? 'bg-[#0d59f2]/20 border-[#0d59f2] shadow-md' 
+                            ? 'bg-[#0d59f2]/20 border-[#0d59f2] shadow-[0_0_15px_rgba(13,89,242,0.2)]' 
                             : 'bg-[#182234] border-[#314368] hover:border-[#90a4cb]'
                         }`}
                     >
-                        <div className="flex justify-between items-center mb-1">
+                        {/* Selection Indicator Bar */}
+                        {activeVersionId === v.id && (
+                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#0d59f2]"></div>
+                        )}
+                        
+                        <div className="flex justify-between items-center mb-1 pl-1">
                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${v.isBaseline ? 'bg-[#0d59f2] text-white' : 'bg-slate-700 text-slate-300'}`}>
                                 {v.id}
                             </span>
-                            <span className="text-[9px] text-[#90a4cb]">{new Date(v.timestamp).toLocaleTimeString()}</span>
+                            <span className="text-[9px] text-[#90a4cb]">{new Date(v.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                         </div>
-                        <p className="text-xs font-bold text-white mb-2">{v.name}</p>
-                        <div className="flex justify-between text-[9px]">
+                        <p className="text-xs font-bold text-white mb-2 pl-1 truncate">{v.name}</p>
+                        <div className="flex justify-between text-[9px] pl-1">
                             <div className="text-center">
-                                <span className="block text-[#90a4cb]">Sharpe</span>
-                                <span className="block font-bold text-[#0bda5e]">{v.metrics.sharpe}</span>
+                                <span className="block text-[#90a4cb] mb-0.5">Sharpe</span>
+                                <span className={`block font-bold ${v.metrics.sharpe > 1 ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>{v.metrics.sharpe}</span>
                             </div>
                             <div className="text-center">
-                                <span className="block text-[#90a4cb]">Drift</span>
+                                <span className="block text-[#90a4cb] mb-0.5">Drift</span>
                                 <span className={`block font-bold ${v.metrics.oosDrift > 0.5 ? 'text-[#fa6238]' : 'text-[#0bda5e]'}`}>{v.metrics.oosDrift}</span>
                             </div>
                         </div>
@@ -388,13 +414,21 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
                 </div>
                 
                 <div className="flex items-center gap-3">
-                    <button className="px-3 py-1.5 rounded bg-[#182234] border border-[#314368] text-[10px] font-bold uppercase hover:text-white text-[#90a4cb] transition-colors">
-                        Compare Baseline
+                    <button 
+                        onClick={() => setShowBenchmark(!showBenchmark)}
+                        className={`px-3 py-1.5 rounded border text-[10px] font-bold uppercase transition-all flex items-center gap-2 ${
+                            showBenchmark 
+                            ? 'bg-[#0bda5e]/10 text-[#0bda5e] border-[#0bda5e]' 
+                            : 'bg-[#182234] text-[#90a4cb] border-[#314368] hover:text-white'
+                        }`}
+                    >
+                        <span className="material-symbols-outlined text-xs">{showBenchmark ? 'visibility' : 'visibility_off'}</span>
+                        {showBenchmark ? 'Baseline ON' : 'Compare Baseline'}
                     </button>
                     <button 
                         onClick={deployToCockpit}
                         disabled={!activeModel}
-                        className={`px-4 py-1.5 rounded bg-[#0d59f2] text-white text-[10px] font-bold uppercase hover:bg-[#1a66ff] transition-all flex items-center gap-2 ${!activeModel ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`px-4 py-1.5 rounded bg-[#0d59f2] text-white text-[10px] font-bold uppercase hover:bg-[#1a66ff] transition-all flex items-center gap-2 shadow-lg shadow-[#0d59f2]/20 ${!activeModel ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         <span className="material-symbols-outlined text-sm">rocket_launch</span>
                         Deploy to Cockpit
@@ -415,7 +449,9 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
                             </h3>
                             <div className="flex gap-4 text-[10px] uppercase font-bold text-[#90a4cb]">
                                 <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-[#fa6238]"></span> Strategy</span>
-                                <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-[#555]"></span> Benchmark</span>
+                                {showBenchmark && (
+                                    <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-[#555]"></span> Benchmark (Buy&Hold)</span>
+                                )}
                                 <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-[#182234] border border-[#314368] rounded-sm"></span> OOS Region</span>
                             </div>
                         </div>
@@ -443,8 +479,10 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
                                         {/* OOS Shading */}
                                         <ReferenceLine x={chartData[Math.floor(chartData.length * 0.7)]?.date} stroke="#314368" strokeDasharray="3 3" label={{ value: "OOS START", fill: "#90a4cb", fontSize: 10, position: 'insideTopRight' }} />
                                         
-                                        <Line type="monotone" dataKey="benchmark" stroke="#555" strokeWidth={1} dot={false} strokeDasharray="4 4" />
-                                        <Area type="monotone" dataKey="equity" stroke="#fa6238" strokeWidth={2} fill="url(#eqGradient)" />
+                                        {showBenchmark && (
+                                            <Line type="monotone" dataKey="benchmark" stroke="#64748b" strokeWidth={1.5} dot={false} strokeDasharray="4 4" name="Benchmark" />
+                                        )}
+                                        <Area type="monotone" dataKey="equity" stroke="#fa6238" strokeWidth={2} fill="url(#eqGradient)" name="Strategy Equity" />
                                     </ComposedChart>
                                 </ResponsiveContainer>
                             )}
@@ -455,20 +493,35 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
                         {/* CHART 2: Attribution */}
                         <div className="flex-1 bg-[#182234]/30 border border-[#314368] rounded-xl p-4 flex flex-col">
                             <h3 className="text-xs font-bold text-white uppercase tracking-widest mb-4">Factor Weight Attribution</h3>
-                            <div className="flex-1">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={attributionData} layout="vertical" margin={{ left: 20 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#222f49" horizontal={false} />
-                                        <XAxis type="number" hide />
-                                        <YAxis dataKey="name" type="category" tick={{fill: '#90a4cb', fontSize: 10}} axisLine={false} tickLine={false} width={80} />
-                                        <Tooltip cursor={{fill: '#222f49'}} contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368', fontSize: '10px' }} />
-                                        <Bar dataKey="weight" fill="#0d59f2" radius={[0, 4, 4, 0]} barSize={12}>
-                                            {attributionData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={entry.weight > 0 ? '#0d59f2' : '#fa6238'} />
-                                            ))}
-                                        </Bar>
-                                    </BarChart>
-                                </ResponsiveContainer>
+                            <div className="flex-1 relative">
+                                {attributionData.length > 0 ? (
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={attributionData} layout="vertical" margin={{ left: 20 }}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#222f49" horizontal={false} />
+                                            <XAxis type="number" hide />
+                                            <YAxis dataKey="name" type="category" tick={{fill: '#90a4cb', fontSize: 10}} axisLine={false} tickLine={false} width={80} />
+                                            <Tooltip cursor={{fill: '#222f49'}} contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368', fontSize: '10px' }} />
+                                            <Bar dataKey="weight" fill="#0d59f2" radius={[0, 4, 4, 0]} barSize={12}>
+                                                {attributionData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.weight > 0 ? '#0d59f2' : '#fa6238'} />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                ) : (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-[#90a4cb] p-4 text-center">
+                                        <span className="material-symbols-outlined text-2xl mb-2 opacity-50">data_loss_prevention</span>
+                                        <p className="text-xs font-bold uppercase tracking-wide">No Factor Attribution</p>
+                                        <p className="text-[10px] opacity-70 mt-1">
+                                            The signal pushed from Risk Control contains no factor weights. 
+                                            <br/>
+                                            Did you skip the Multi-Factor Fusion layer?
+                                        </p>
+                                        <button onClick={() => onNavigate('multiFactorFusion')} className="mt-3 px-3 py-1 bg-[#222f49] hover:bg-[#314368] rounded text-[10px] font-bold text-[#0d59f2] border border-[#314368] transition-colors">
+                                            Go to Fusion
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -517,15 +570,18 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
                             AI Optimizer
                         </h4>
                         
-                        <div className="min-h-[100px] mb-4 text-[11px] leading-relaxed text-slate-300">
-                            {aiAnalysis.loading ? (
-                                <div className="flex items-center gap-2 text-[#90a4cb]">
-                                    <span className="material-symbols-outlined text-sm animate-spin">sync</span>
-                                    analyzing equity surface...
-                                </div>
-                            ) : (
-                                aiAnalysis.text
-                            )}
+                        <div className="min-h-[100px] mb-4">
+                            <span className="text-[9px] font-bold text-[#90a4cb] uppercase block mb-1">Diagnosis</span>
+                            <div className="text-[11px] leading-relaxed text-slate-300">
+                                {aiAnalysis.loading ? (
+                                    <div className="flex items-center gap-2 text-[#90a4cb]">
+                                        <span className="material-symbols-outlined text-sm animate-spin">sync</span>
+                                        analyzing equity surface...
+                                    </div>
+                                ) : (
+                                    aiAnalysis.text
+                                )}
+                            </div>
                         </div>
 
                         {aiAnalysis.suggestions.length > 0 && (
@@ -567,12 +623,5 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
             </div>
         </main>
       </div>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #314368; border-radius: 10px; }
-      `}</style>
-    </div>
-  );
+    );
 };

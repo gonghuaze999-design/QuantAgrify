@@ -206,7 +206,9 @@ const processAndFusionData = (
 
         // 5. Custom (Forward Fill)
         while (customIdx < customData.length && customData[customIdx].date <= dateStr) {
-            if (customData[customIdx].score !== null) lastCustomVal = customData[customIdx].score;
+            // Updated to handle both 'score' (old) and 'close' (new OHLCV) formats
+            const val = customData[customIdx].close !== undefined ? customData[customIdx].close : (customData[customIdx].value || customData[customIdx].score);
+            if (val !== undefined && val !== null) lastCustomVal = val;
             customIdx++;
         }
 
@@ -269,6 +271,7 @@ const processAndFusionData = (
         else if (layer.satellitePackage) layerMeta = layer.satellitePackage.metadata;
         else if (layer.macroPackage) layerMeta = layer.macroPackage.metadata;
         else if (layer.spotPackage) layerMeta = layer.spotPackage.metadata;
+        else if (layer.knowledgePackage) layerMeta = layer.knowledgePackage.metadata;
     }
 
     return {
@@ -333,8 +336,10 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
       ALGO_VIEW_CACHE.isRegionMismatch = isRegionMismatch;
   }, [selectedAsset, rolloverRule, gapMethod, activeLayerId, status, activeStep, logs, rawDataCache, chartData, metrics, layerMeta, isRegionMismatch]);
 
+  // Updated: Include PUSHED_ASSETS dynamically (for Custom Uploads)
   const allAssets = useMemo(() => {
       const list: { id: string, label: string }[] = [];
+      // 1. Standard Exchange Assets
       Object.entries(EXCHANGE_MAPPING).forEach(([suffix, exchange]) => {
           exchange.varieties.forEach(v => {
               list.push({
@@ -343,8 +348,22 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
               });
           });
       });
+      
+      // 2. Dynamically Pushed Assets (e.g. from Custom Upload)
+      // Check if there are assets in PUSHED_ASSETS not in the standard list
+      Array.from(PUSHED_ASSETS).forEach(id => {
+          const exists = list.some(l => l.id === id);
+          if (!exists) {
+              const ctx = PUSHED_ASSET_CONTEXTS.get(id);
+              list.push({
+                  id: id,
+                  label: ctx ? `${ctx.variety} (Custom) - ${ctx.exchange}` : id
+              });
+          }
+      });
+      
       return list;
-  }, []);
+  }, [PUSHED_ASSETS.size]); // Re-compute when PUSHED_ASSETS changes
 
   const handleAssetChange = (newAsset: string) => {
       if (newAsset !== selectedAsset) {
@@ -377,7 +396,8 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
           setChartData(data);
           setMetrics(newMetrics);
           setLayerMeta(meta);
-          if (meta && meta.assetName) {
+          // Simplified Mismatch Check: Only warn if both have strong geo signatures
+          if (meta && meta.assetName && !selectedAsset.includes('Custom')) {
               const rawCode = selectedAsset.replace(/[0-9.]/g, ''); 
               const weatherName = meta.assetName.toUpperCase();
               const match = weatherName.includes(`- ${rawCode})`) || weatherName.includes(`(${rawCode})`);
@@ -398,60 +418,105 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
     setLogs([]);
     setActiveStep(1);
     
-    // 1. JQData Connection
-    const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
-    const jqNode = savedConns.find((c: any) => c.provider === 'JQData (JoinQuant)');
-    if (!jqNode || !jqNode.username) {
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ERROR] JQData Credentials missing/offline.`]);
-        setStatus('IDLE');
-        return;
-    }
-
-    // 2. Context Loading
+    // 1. Context Loading
     const context = PUSHED_ASSET_CONTEXTS.get(selectedAsset);
-    let symbol = selectedAsset;
-    let startDate = "";
-    let endDate = "";
-    if (context) {
-        symbol = context.symbol;
-        startDate = context.startDate;
-        endDate = context.endDate;
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INIT] Loaded Context: ${symbol} (${startDate} to ${endDate})`]);
-    } else {
-        if (symbol.includes('.') && !/\d/.test(symbol.split('.')[0])) {
-            const parts = symbol.split('.');
-            symbol = `${parts[0]}9999.${parts[1]}`;
+    let rawData = [];
+
+    // --- BRANCHING LOGIC: FUTURES VS CUSTOM ---
+    
+    if (context && context.dataSourceName === 'Knowledge Base') {
+        // --- PATH A: CUSTOM ASSET (KNOWLEDGE BASE) ---
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INIT] Detected Custom Knowledge Asset: ${context.variety}`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Retrieving quantified time-series from Knowledge Layer...`]);
+        
+        await new Promise(r => setTimeout(r, 600)); // Sim network
+        
+        const knowledgeLayer = DATA_LAYERS.get('knowledge');
+        if (!knowledgeLayer || !knowledgeLayer.knowledgePackage) {
+             setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ERROR] Knowledge data missing from memory.`]);
+             setStatus('IDLE');
+             return;
         }
-        const d = new Date();
-        endDate = d.toISOString().split('T')[0];
-        d.setDate(d.getDate() - 365);
-        startDate = d.toISOString().split('T')[0];
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [WARN] No specific context found. Defaulting to 1 year history.`]);
+
+        // Construct Synthetic OHLCV Backbone from Score
+        const series = knowledgeLayer.knowledgePackage.quantifiedSeries;
+        rawData = series.map((s: any) => ({
+            date: s.date,
+            // Enhanced Mapping for Custom Upload ETL
+            open: s.open !== undefined ? s.open : (s.value || s.score || 0),
+            high: s.high !== undefined ? s.high : (s.value || s.score || 0),
+            low: s.low !== undefined ? s.low : (s.value || s.score || 0),
+            close: s.close !== undefined ? s.close : (s.value || s.score || 0),
+            volume: s.volume || 0,
+            open_interest: s.open_interest || 0
+        }));
+        
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [TRANSFORM] Constructed ${rawData.length} synthetic bars from Knowledge Score.`]);
+        setRawDataCache(rawData);
+        setActiveStep(2);
+
+    } else {
+        // --- PATH B: STANDARD FUTURES (JQDATA) ---
+        // JQData Connection
+        const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
+        const jqNode = savedConns.find((c: any) => c.provider === 'JQData (JoinQuant)');
+        if (!jqNode || !jqNode.username) {
+            setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ERROR] JQData Credentials missing/offline.`]);
+            setStatus('IDLE');
+            return;
+        }
+
+        let symbol = selectedAsset;
+        let startDate = "";
+        let endDate = "";
+        if (context) {
+            symbol = context.symbol;
+            startDate = context.startDate;
+            endDate = context.endDate;
+            setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INIT] Loaded Context: ${symbol} (${startDate} to ${endDate})`]);
+        } else {
+            if (symbol.includes('.') && !/\d/.test(symbol.split('.')[0])) {
+                const parts = symbol.split('.');
+                symbol = `${parts[0]}9999.${parts[1]}`;
+            }
+            const d = new Date();
+            endDate = d.toISOString().split('T')[0];
+            d.setDate(d.getDate() - 365);
+            startDate = d.toISOString().split('T')[0];
+            setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [WARN] No specific context found. Defaulting to 1 year history.`]);
+        }
+
+        try {
+            // Ingest Futures Data (Backbone)
+            setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Connecting to JQData Bridge...`]);
+            const response = await fetch(`${jqNode.url.trim().replace(/\/$/, '')}/api/jqdata/price`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: jqNode.username,
+                    password: jqNode.password,
+                    symbol: symbol,
+                    frequency: 'daily',
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            });
+            if (!response.ok) throw new Error(`Backend Status ${response.status}`);
+            const json = await response.json();
+            if (!json.success || !json.data) throw new Error(json.error || "No data returned");
+            rawData = json.data;
+            setRawDataCache(rawData); 
+            setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Downloaded ${rawData.length} futures bars.`]);
+            
+            setActiveStep(2);
+        } catch (e: any) {
+            setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ERROR] Pipeline Failed: ${e.message}`]);
+            setStatus('IDLE');
+            return;
+        }
     }
 
     try {
-        // 3. Ingest Futures Data (Backbone)
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Connecting to JQData Bridge...`]);
-        const response = await fetch(`${jqNode.url.trim().replace(/\/$/, '')}/api/jqdata/price`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                username: jqNode.username,
-                password: jqNode.password,
-                symbol: symbol,
-                frequency: 'daily',
-                start_date: startDate,
-                end_date: endDate
-            })
-        });
-        if (!response.ok) throw new Error(`Backend Status ${response.status}`);
-        const json = await response.json();
-        if (!json.success || !json.data) throw new Error(json.error || "No data returned");
-        const rawData = json.data;
-        setRawDataCache(rawData); 
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [INGEST] Downloaded ${rawData.length} futures bars.`]);
-        
-        setActiveStep(2);
         await new Promise(r => setTimeout(r, 500));
         
         // 4. Scanning Data Layers
@@ -468,7 +533,7 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
         // 5. Alignment & Fusion (ETL)
         setActiveStep(3);
         await new Promise(r => setTimeout(r, 500));
-        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ALIGN] Establishing Master Date Index based on Futures Trading Days.`]);
+        setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [ALIGN] Establishing Master Date Index based on Asset Timeline.`]);
         setLogs(prev => [...prev, `${new Date().toLocaleTimeString()} [TRANSFORM] Executing Forward-Fill / Date-Match algorithms...`]);
         
         const { data, metrics: finalMetrics, layerMeta: meta, fusedCount } = processAndFusionData(rawData, gapMethod, activeLayerId);
@@ -644,7 +709,7 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
                 
                 <div className="space-y-5">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-[#90a4cb] uppercase">Target Asset (From Futures)</label>
+                    <label className="text-[10px] font-bold text-[#90a4cb] uppercase">Target Asset</label>
                     <select 
                       value={selectedAsset} 
                       onChange={(e) => handleAssetChange(e.target.value)}
@@ -662,7 +727,7 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
                     </select>
                     {PUSHED_ASSETS.size === 0 && (
                         <p className="text-[9px] text-[#fa6238] mt-1">
-                            * No assets pushed. Go to "Futures Trading" and push an asset.
+                            * No assets pushed. Go to "Futures Trading" or "Custom Upload" to push an asset.
                         </p>
                     )}
                   </div>
@@ -815,7 +880,7 @@ export const AlgorithmWorkflow: React.FC<AlgorithmWorkflowProps> = ({ onNavigate
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-[#90a4cb] gap-3 z-10 bg-[#182234]/50 backdrop-blur-sm">
                     <span className="material-symbols-outlined text-4xl opacity-50">pending</span>
                     <span className="text-xs font-bold uppercase tracking-widest">Pipeline Not Executed</span>
-                    <p className="text-[10px]">Click "Execute Pipeline" to ingest JQData.</p>
+                    <p className="text-[10px]">Click "Execute Pipeline" to ingest data.</p>
                   </div>
                 )}
                 

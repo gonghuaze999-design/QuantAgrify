@@ -538,7 +538,11 @@ export const MultiFactorFusion: React.FC<MultiFactorFusionProps> = ({ onNavigate
                         </div>
                         {isAdaptive && (
                             <div className="mt-4 p-3 bg-[#0d59f2]/10 border border-[#0d59f2]/30 rounded-lg text-[10px] text-[#0d59f2] font-bold text-center animate-pulse">
-                                AI is dynamically adjusting weights based on Regime Score.
+                                AI is dynamically adjusting weights based on market regime.
+                                <div className="mt-1 text-[9px] opacity-80 text-white">
+                                    Regime Score: {policyInput?.sentimentScore.toFixed(2)} ({policyInput?.sentimentScore > 0.1 ? 'Bullish' : policyInput?.sentimentScore < -0.1 ? 'Bearish' : 'Neutral'})
+                                    {Math.abs(policyInput?.sentimentScore || 0) < 0.1 && " - Weights unchanged due to low conviction."}
+                                </div>
                             </div>
                         )}
                     </div>

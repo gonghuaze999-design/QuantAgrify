@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { DATA_LAYERS, CUSTOM_UPLOAD_STATE } from './GlobalState';
+import { DATA_LAYERS, CUSTOM_UPLOAD_STATE, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface CustomUploadProps {
-  onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'cockpit' | 'api') => void;
+  onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'api') => void;
 }
 
 // --- Data Models ---
@@ -98,6 +98,16 @@ const fileToBase64 = (file: File): Promise<string> => {
             }
         };
         reader.onerror = error => reject(error);
+    });
+};
+
+// Helper: Read File as Text (for CSV/JSON)
+const readFileAsText = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsText(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
     });
 };
 
@@ -654,54 +664,82 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       };
   }, [isDraggingNode, isPanning, handleMouseMove]);
 
-  // --- Step 5: QUANTIFICATION & PUSH ---
+  // --- Step 5: QUANTIFICATION & PUSH (UPGRADED ETL ENGINE) ---
   const handlePushSignal = async () => {
       const selectedAssets = library.filter(f => modelingQueue.has(f.id));
       if (selectedAssets.length === 0) return;
 
       setIsProcessingAI(true);
 
-      // 1. Build Context for Gemini
-      const contextText = selectedAssets.map(f => 
-          `- File: ${f.name}\n- Type: ${f.category}\n- Summary: ${f.summary}\n- Sentiment: ${f.sentiment}\n- Impact Score: ${f.impactScore}`
-      ).join('\n\n');
-
-      const prompt = `
-        Role: Quantitative Historian & Data Structurer.
-        Task: Convert the unstructured knowledge within the provided files into a structured, quantitative time-series.
-        
-        CRITICAL INSTRUCTION: 
-        The time series must correspond strictly to the *dates mentioned or implied in the source files*. 
-        Do NOT generate data for "today" or "past 30 days" relative to now, unless the files are actually from today.
-        If the file is a "October 2023 Crop Report", the data series must be for October 2023.
-        
-        Input Context (Selected Nodes):
-        ${contextText}
-        
-        Steps:
-        1. Analyze the content to determine the specific historical date range relevant to the events described.
-        2. Generate a daily 'Alpha Score' (0-100) for that specific range.
-           - 0: Extremely Bearish/Negative Impact.
-           - 50: Neutral.
-           - 100: Extremely Bullish/Positive Impact.
-        3. Provide a 'rationale' referencing the specific source content.
-        
-        Output JSON Schema:
-        {
-          "series": [
-            { "date": "YYYY-MM-DD", "score": number } 
-          ],
-          "rationale": "Explanation citing specific file content."
-        }
-      `;
-
       try {
           if (!process.env.API_KEY) throw new Error("API Key Missing");
-
+          
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          
+          // --- REAL ETL PROCESSING ---
+          // Determine Primary Asset
+          const primaryAssetRef = selectedAssets[0];
+          const file = fileRegistryRef.current[primaryAssetRef.id];
+          
+          // Build Advanced Prompt
+          let parts: any[] = [];
+          
+          // Inject Content (Text or Binary)
+          if (file) {
+              if (file.type.startsWith('text/') || file.name.endsWith('.csv') || file.name.endsWith('.json') || file.name.endsWith('.txt')) {
+                  const textContent = await readFileAsText(file);
+                  // Truncate to safe token limit (approx 30k chars)
+                  parts.push({ text: `RAW FILE CONTENT (Truncated):\n${textContent.substring(0, 30000)}` });
+              } else {
+                  // Binary (PDF, Audio, Video, Image)
+                  const b64 = await fileToBase64(file);
+                  parts.push({ inlineData: { mimeType: file.type, data: b64 } });
+              }
+          }
+
+          // Context of other selected files (Metadata only for secondary)
+          if (selectedAssets.length > 1) {
+              const otherContext = selectedAssets.slice(1).map(f => 
+                  `- Secondary File: ${f.name} (${f.category}) - ${f.summary}`
+              ).join('\n');
+              parts.push({ text: `Additional Context Files:\n${otherContext}` });
+          }
+
+          const systemPrompt = `
+            Role: Advanced Quantitative Data ETL Engine.
+            Mission: Extract PRECISE financial time-series data from the provided input file.
+            
+            STRICT RULES:
+            1. **STRUCTURED INPUT (CSV/JSON/Text)**: 
+               - If the file contains a table or structured list, EXTRACT IT EXACTLY. 
+               - Map columns to standard OHLCV: Date, Open, High, Low, Close, Volume.
+               - If only 'Price' or 'Value' exists, map it to 'Close' and set Open/High/Low to the same value.
+               - DO NOT Hallucinate numbers. Use the exact values from the file.
+               - If the date format is non-standard, normalize to YYYY-MM-DD.
+            
+            2. **UNSTRUCTURED INPUT (Audio/Video/PDF/Image)**: 
+               - If it's a chart image, estimate the data points.
+               - If it's audio/video (e.g. reading a market report), transcribe the numbers mentioned into a time-series.
+               - If no specific numbers are found, generate a 'Sentiment Score' series (0-100) based on the tone over time.
+
+            3. **OUTPUT FORMAT**:
+               - Return strictly VALID JSON. No markdown fencing.
+               - The 'series' array must be sorted by date.
+            
+            Output JSON Schema:
+            {
+              "series": [
+                { "date": "YYYY-MM-DD", "open": number, "high": number, "low": number, "close": number, "volume": number, "open_interest": number }
+              ],
+              "rationale": "Brief explanation of how data was extracted (e.g. 'Parsed CSV columns A,B,C...')."
+            }
+          `;
+          
+          parts.push({ text: systemPrompt });
+
           const response = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
-              contents: { parts: [{ text: prompt }] },
+              model: "gemini-2.5-flash", // Using flash for larger context window / multimodal
+              contents: { parts: parts },
               config: { responseMimeType: "application/json" }
           });
 
@@ -709,40 +747,82 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
           const result = JSON.parse(resultText || "{}");
 
           if (!result.series || !Array.isArray(result.series)) {
-              throw new Error("Invalid AI Response Format");
+              throw new Error("Invalid AI Response Format: Missing 'series' array.");
+          }
+
+          // --- Determine Primary Asset Name & Metadata ---
+          // Use the relatedAsset from the first file as primary if available, otherwise filename
+          const primaryAsset = primaryAssetRef.relatedAssets[0] || primaryAssetRef.name.replace(/\.[^/.]+$/, "") || "Custom Knowledge Asset";
+          
+          // Collect aggregated tags and categories
+          const aggregatedTags = Array.from<string>(new Set(selectedAssets.flatMap(f => f.tags)));
+          const primaryCategory = selectedAssets[0]?.category || "General";
+
+          // Calculate approximate start/end date from series
+          let start = "";
+          let end = "";
+          if (result.series.length > 0) {
+              // Ensure sorted
+              result.series.sort((a: any, b: any) => a.date.localeCompare(b.date));
+              start = result.series[0].date;
+              end = result.series[result.series.length - 1].date;
           }
 
           // 2. Push to Global State Data Layer
           DATA_LAYERS.set('knowledge', {
               sourceId: 'knowledge',
-              name: `Knowledge Graph (${selectedAssets.length} Nodes)`,
+              name: `Knowledge: ${primaryAsset}`,
               metricName: 'Unstructured Alpha',
               data: result.series.map((s: any) => ({
                   date: s.date,
-                  value: s.score,
-                  meta: { rationale: result.rationale }
+                  value: s.close || s.score || 0, // Default visualization value
+                  meta: { 
+                      open: s.open, 
+                      high: s.high, 
+                      low: s.low, 
+                      vol: s.volume,
+                      rationale: result.rationale 
+                  }
               })),
               knowledgePackage: {
-                  quantifiedSeries: result.series,
+                  quantifiedSeries: result.series, // This now contains full OHLCV structure
                   sourceFiles: selectedAssets.map(f => ({
                       id: f.id,
                       name: f.name,
                       summary: f.summary,
                       impact: f.impactScore,
-                      sentiment: f.sentiment
+                      sentiment: f.sentiment,
+                      category: f.category,
+                      tags: f.tags
                   })),
                   metadata: {
-                      generatedAt: Date.now()
+                      generatedAt: Date.now(),
+                      assetName: primaryAsset,
+                      category: primaryCategory,
+                      tags: aggregatedTags
                   }
               },
               timestamp: Date.now()
+          });
+
+          // --- 3. REGISTER AS A VALID TARGET ASSET ---
+          // This makes it selectable in AlgorithmWorkflow
+          const uniqueId = `CUSTOM:${primaryAsset.replace(/\s+/g, '_')}`;
+          PUSHED_ASSETS.add(uniqueId);
+          PUSHED_ASSET_CONTEXTS.set(uniqueId, {
+              symbol: uniqueId,
+              variety: primaryAsset, // Display Name
+              exchange: 'Custom Upload',
+              startDate: start,
+              endDate: end,
+              dataSourceName: 'Knowledge Base' // Special Flag
           });
 
           setIsPushed(true);
 
       } catch (e) {
           console.error("Quantification Failed", e);
-          alert("AI Quantification Failed. Please check API Key or try fewer files.");
+          alert("AI Quantification Failed. Please check API Key or ensure file format is readable.");
       } finally {
           setIsProcessingAI(false);
       }

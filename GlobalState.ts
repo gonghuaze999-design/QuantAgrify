@@ -205,6 +205,9 @@ export interface KnowledgeDataPackage {
     sourceFiles: any[];
     metadata: {
         generatedAt: number;
+        assetName?: string;
+        category?: string;
+        tags?: string[];
     };
 }
 

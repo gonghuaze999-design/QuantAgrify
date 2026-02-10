@@ -323,7 +323,14 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       if (!tId) {
           const f = activeFactors.find(f => f.id === factorId);
           if (f && f.source === 'TEMPLATE') {
-              tId = f.id.split('_')[0] + '_' + f.id.split('_')[1];
+              // FIX: Correctly reconstruct template ID from complex ID format f_TEMPLATEID_TIMESTAMP
+              // Example: f_rsi_14_12345 -> split -> ['f', 'rsi', '14', '12345'] -> slice(1, 3) -> join -> 'rsi_14'
+              const parts = f.id.split('_');
+              // Assuming standard format f_{part1}_{part2}_{timestamp} or f_{part1}_{part2}_{part3}_{timestamp}
+              // We grab everything between first 'f' and last 'timestamp'
+              if (parts.length >= 3) {
+                  tId = parts.slice(1, parts.length - 1).join('_');
+              }
           }
       }
 
@@ -526,7 +533,12 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       activeFactors.forEach(factor => {
           let tId = undefined;
           if (factor.source === 'TEMPLATE') {
-              tId = factor.id.split('_')[0] + '_' + factor.id.split('_')[1];
+              // FIX: Robust ID Parsing for Push Logic
+              // Correctly reconstruct 'rsi_14', 'mom_10' etc from 'f_rsi_14_171...'
+              const parts = factor.id.split('_');
+              if (parts.length >= 3) {
+                  tId = parts.slice(1, parts.length - 1).join('_');
+              }
           }
           
           const values = computeFactorValues(prices, volumes, oi, layerValues, tId || 'UNKNOWN');
@@ -753,7 +765,9 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
                                                 key={f.id}
                                                 onClick={() => { 
                                                     setSelectedFactorId(f.id); 
-                                                    const tmplId = f.source === 'TEMPLATE' ? f.id.split('_')[0] + '_' + f.id.split('_')[1] : undefined;
+                                                    // Use fix here too just in case
+                                                    const parts = f.id.split('_');
+                                                    const tmplId = f.source === 'TEMPLATE' && parts.length >= 3 ? parts.slice(1, parts.length - 1).join('_') : undefined;
                                                     calculateFactor(f.id, tmplId); 
                                                 }} 
                                                 className={`h-8 px-3 rounded border flex items-center justify-center text-[10px] font-bold transition-all whitespace-nowrap shrink-0 ${selectedFactorId === f.id ? 'bg-[#0d59f2] border-[#0d59f2] text-white' : 'bg-[#182234] border-[#314368] text-[#90a4cb]'}`}
