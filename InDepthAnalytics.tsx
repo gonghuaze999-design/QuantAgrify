@@ -1,5 +1,6 @@
 
-import React from 'react';
+import React, { useState } from 'react';
+import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
 import { getTrendColor } from './GlobalState';
 
@@ -8,6 +9,42 @@ interface InDepthAnalyticsProps {
 }
 
 export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }) => {
+  const [narrative, setNarrative] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const generateNarrative = async () => {
+      if (!process.env.API_KEY) return;
+      setIsGenerating(true);
+      try {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          // Mock data context - in real app this comes from props or state
+          const context = `
+            Attribution Data:
+            - Total Return: +14.2%
+            - Weather Factor: +4.2% (Contribution), trend positive.
+            - Macro Factor: -2.1% (Contribution), trend negative due to USD strength.
+            - Momentum Factor: +5.6% (Contribution), strong signal.
+            - Residual: -1.2%
+          `;
+          
+          const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: `
+                Act as a Senior Portfolio Manager.
+                Analyze this attribution data and write a short, professional "Daily Attribution Brief" (max 3 sentences).
+                Explain WHY the return happened.
+                
+                ${context}
+              `
+          });
+          setNarrative(response.text || "Analysis failed.");
+      } catch (e) {
+          setNarrative("AI Service Unavailable.");
+      } finally {
+          setIsGenerating(false);
+      }
+  };
+
   const navItems = [
     { label: 'Data Source', icon: 'database', view: 'dataSource' as const },
     { label: 'Algorithm', icon: 'precision_manufacturing', view: 'algorithm' as const },
@@ -35,41 +72,41 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
   return (
     <div className="bg-[#0a0c10] text-white font-['Space_Grotesk'] h-screen flex flex-col overflow-hidden selection:bg-[#0d59f2]/30">
       {/* Global Header */}
-      <header className="flex items-center justify-between border-b border-[#222f49] bg-[#0a0c10] px-6 h-16 shrink-0 z-50">
-        <div className="flex items-center gap-3 w-1/4 cursor-pointer" onClick={() => onNavigate('hub')}>
-          <div className="bg-[#0d59f2] h-10 w-10 flex items-center justify-center rounded-lg shadow-lg shadow-[#0d59f2]/20">
+      <nav className="h-16 border-b border-[#222f49] bg-[#0a0c10] px-6 flex items-center justify-between z-[60] shrink-0">
+        <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
+          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col leading-none">
-            <h1 className="text-white text-xl font-bold tracking-tight">QuantAgrify</h1>
-            <span className="text-[9px] text-[#90a4cb] font-bold tracking-[0.2em] uppercase mt-1">WEALTH FROM AGRI</span>
+          <div className="flex flex-col text-left leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
+            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
-
-        <nav className="flex-1 flex justify-center items-center gap-10 h-full">
+        
+        <div className="flex items-center gap-10 h-full">
           {navItems.map((item) => (
-            <button
+            <button 
               key={item.label}
               onClick={() => item.view !== 'cockpit' && onNavigate(item.view)}
-              className={`h-full flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-all relative border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
+              className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
               <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}
             </button>
           ))}
-        </nav>
+        </div>
 
-        <div className="flex items-center justify-end gap-4 w-1/4">
+        <div className="flex items-center gap-4 w-80 justify-end">
           <SystemClock />
           <div className="h-8 w-px bg-[#222f49] mx-2"></div>
-          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
+          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer hover:border-[#0d59f2] transition-colors">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>
         </div>
-      </header>
+      </nav>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar */}
+        {/* Left Sidebar - STANDARDIZED */}
         <aside className="w-20 border-r border-[#222f49] bg-[#0a0c10] flex flex-col items-center py-6 gap-8 shrink-0">
           {sideNavItems.map(item => (
             <div 
@@ -77,13 +114,13 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
               onClick={() => item.view && onNavigate(item.view)}
               className={`group flex flex-col items-center gap-1 cursor-pointer transition-colors ${item.active ? 'text-[#0d59f2]' : 'text-[#90a4cb] hover:text-white'}`}
             >
-              <div className={`p-2.5 rounded-xl ${item.active ? 'bg-[#0d59f2] text-white shadow-[0_0_15px_rgba(13,89,242,0.3)]' : 'hover:bg-[#182234]'}`}>
+              <div className={`p-2.5 rounded-xl transition-all ${item.active ? 'bg-[#0d59f2] text-white shadow-[0_0_15px_rgba(13,89,242,0.3)]' : 'hover:bg-[#182234]'}`}>
                 <span className="material-symbols-outlined">{item.icon}</span>
               </div>
-              <span className="text-[10px] font-bold">{item.label}</span>
+              <span className="text-[10px] font-bold uppercase tracking-tighter">{item.label}</span>
             </div>
           ))}
-          <div className="mt-auto flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
+          <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
             <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
             <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
           </div>
@@ -126,9 +163,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                 {heatmapData.flat().map((val, i) => {
                   const isPositive = val >= 0;
                   const absVal = Math.abs(val);
-                  // Use inline style for dynamic background color from CSS variable
                   const bgColor = isPositive ? 'var(--trend-up)' : 'var(--trend-down)';
-                  
                   return (
                     <div 
                       key={i} 
@@ -142,8 +177,8 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
               </div>
             </div>
 
-            {/* PnL Attribution */}
-            <div className="col-span-12 lg:col-span-6 rounded-xl bg-[#182234] border border-[#222f49] p-6">
+            {/* PnL Attribution & AI Narrative */}
+            <div className="col-span-12 lg:col-span-6 rounded-xl bg-[#182234] border border-[#222f49] p-6 flex flex-col">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wide">
                   <span className="material-symbols-outlined text-[#0d59f2]">analytics</span>
@@ -151,12 +186,13 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                 </h3>
                 <span className={`text-xs font-bold uppercase tracking-tighter ${getTrendColor(14.2)}`}>+14.2% Total</span>
               </div>
-              <div className="h-48 w-full flex items-end gap-4 px-2">
+              
+              <div className="h-48 w-full flex items-end gap-4 px-2 mb-6">
                 {[
                   { label: 'Weather', val: '30%', trend: 1, mb: '0%' },
                   { label: 'Macro', val: '15%', trend: -1, mb: '30%' },
                   { label: 'Flow', val: '40%', trend: 1, mb: '15%' },
-                  { label: 'Final', val: '55%', trend: 0, mb: '0%', bold: true } // Blue for final
+                  { label: 'Final', val: '55%', trend: 0, mb: '0%', bold: true }
                 ].map((bar, i) => (
                   <div key={i} className="flex-1 flex flex-col items-center">
                     <div 
@@ -172,19 +208,24 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                   </div>
                 ))}
               </div>
-              <div className="mt-4 pt-4 border-t border-[#222f49] grid grid-cols-3 gap-2">
-                <div className="text-center">
-                  <p className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">Alpha</p>
-                  <p className="text-sm font-bold text-white">8.4%</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">Beta</p>
-                  <p className="text-sm font-bold text-white">5.8%</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-widest">Residual</p>
-                  <p className={`text-sm font-bold ${getTrendColor(-1.2)}`}>-1.2%</p>
-                </div>
+
+              {/* AI Narrative Box */}
+              <div className="flex-1 bg-[#101622] rounded-lg p-4 border border-[#314368] relative">
+                  <div className="flex justify-between items-center mb-2">
+                      <span className="text-[10px] font-black text-[#0d59f2] uppercase tracking-widest flex items-center gap-1">
+                          <span className="material-symbols-outlined text-sm">smart_toy</span> Factor Storyteller
+                      </span>
+                      <button 
+                        onClick={generateNarrative}
+                        disabled={isGenerating}
+                        className="text-[9px] font-bold text-white bg-[#0d59f2] px-2 py-1 rounded hover:bg-[#1a66ff] disabled:opacity-50"
+                      >
+                          {isGenerating ? 'Analyzing...' : 'Generate Insight'}
+                      </button>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                      {narrative || "Click 'Generate Insight' to translate these factors into a readable attribution report."}
+                  </p>
               </div>
             </div>
 
@@ -237,12 +278,6 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                       { name: 'Soybeans (ZS)', wthr: '0.10', macro: '+0.55', flow: '0.89', comp: 'Accumulate', trend: 1 }
                     ].map((row, i) => {
                         const trendClass = getTrendColor(row.trend, 'text');
-                        const bgClass = `bg-[${getTrendColor(row.trend, 'stroke')}]/20`; // Using stroke color for BG base
-                        
-                        // For background we need to be careful with arbitrary values and vars.
-                        // We will use inline style for BG to ensure it picks up the var correctly.
-                        const bgStyle = { backgroundColor: row.trend > 0 ? 'var(--trend-up)' : 'var(--trend-down)', opacity: 0.2 };
-                        
                         return (
                           <tr key={i} className="hover:bg-[#0d59f2]/5 transition-colors group">
                             <td className="px-6 py-4 font-bold text-white uppercase">{row.name}</td>
@@ -252,11 +287,9 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                             <td className="px-6 py-4">
                               <span 
                                   className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-tight ${trendClass}`}
-                                  style={{ backgroundColor: row.trend > 0 ? 'rgba(var(--trend-up-rgb), 0.1)' : 'rgba(var(--trend-down-rgb), 0.1)' }} // Fallback if simple var doesn't work in bg
+                                  style={{ backgroundColor: row.trend > 0 ? 'rgba(var(--trend-up-rgb), 0.1)' : 'rgba(var(--trend-down-rgb), 0.1)' }} 
                               >
-                                  {/* Actually, let's just use the var in a wrapper div if needed, or simple text color is enough for the badge text */}
                                   <span className="relative z-10">{row.comp}</span>
-                                  {/* Simulated BG with opacity using box-shadow or absolute div is cleaner, but let's stick to text color for simplicity or inline style */}
                               </span>
                             </td>
                             <td className="px-6 py-4">
@@ -272,12 +305,6 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
           </div>
         </main>
       </div>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #222f49; border-radius: 10px; }
-      `}</style>
     </div>
   );
 };

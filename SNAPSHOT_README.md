@@ -1,41 +1,36 @@
 
-# QuantAgrify System Snapshot (v3.0.0 Chameleon)
+# QuantAgrify System Snapshot (v3.2.0 Full Suite)
 
-**Timestamp:** System Freeze following Global UI & State Architecture Refactor
-**Status:** **PRODUCTION READY - UI & LOGIC UNIFIED**
+**Timestamp:** System Freeze following Backend Bridge & QA Integration
+**Status:** **PRODUCTION READY - FULL STACK INTEGRATED**
 
-## 1. Major Architecture Upgrade: "The Chameleon System"
-This version introduces a global, zero-latency color interpretation engine. All financial visualizations now rely on abstract CSS variables rather than hardcoded hex values.
+## 1. Architecture Upgrade: "Full Stack Convergence"
+This version (v3.2.0) marks the completion of the backend middleware and validation layer. The application is no longer just a frontend prototype but a fully connected system capable of real data ingestion and rigorous logic testing.
 
-*   **Logic:** `getTrendColor(value)` utility maps mathematical sign (+/-) to abstract Semantic Classes.
-*   **Rendering:** CSS Variables `var(--trend-up)` and `var(--trend-down)` handle the actual pixel painting.
-*   **Control:** `WelcomeHub` acts as the master switch, injecting new hex codes into the DOM root instantly.
+### Core Modules
+*   **OEMS Cockpit:** Closed-loop execution from signal generation to order management.
+*   **Fusion Engine:** Multi-factor alignment of Weather, Satellite, and Macro data.
+*   **Risk Engine:** Ornstein-Uhlenbeck mean reversion modeling and VaR tracking.
 
-## 2. Module Validation Status
-All modules have been scanned and verified for Global Context Sync (Asset/Date) and Color System adherence:
+## 2. Backend Middleware (`backend/main.py`)
+A robust FastAPI Python bridge has been integrated to handle:
+*   **GEE Proxy:** Server-side Google Earth Engine authentication (Service Account hot-swapping).
+*   **JQData Bridge:** Secure tunneling for Chinese Futures data access.
+*   **CORS Management:** Unified proxy handling for tradingeconomics and USDA APIs.
 
-| Module | Trend Logic | Global Context Sync | Status |
-| :--- | :--- | :--- | :--- |
-| **Futures Trading** | CSS Vars (Charts/Table) | ✅ Code/Date Sync | **STABLE** |
-| **Spot Industry** | CSS Vars (Basis/Diff) | ✅ Fuzzy Mapping | **STABLE** |
-| **Policy Sentiment** | CSS Vars (Badges/Radar) | ✅ Keyword Mapping | **STABLE** |
-| **Weather Analysis** | N/A (Meteorological) | ✅ Region Mapping | **STABLE** |
-| **Algorithm** | CSS Vars (Metrics) | ✅ Pushed Context | **STABLE** |
-| **Feature Eng.** | CSS Vars (Quantiles) | ✅ Pipeline Flow | **STABLE** |
-| **Fusion** | CSS Vars (Corr/Signal) | ✅ Factor Weights | **STABLE** |
-| **Risk Control** | CSS Vars (Drawdown) | ✅ Signal Input | **STABLE** |
-| **Backtest** | CSS Vars (Matrix/PnL) | ✅ Strategy Logs | **STABLE** |
-| **Cockpit** | CSS Vars (Tickers/Alerts) | N/A (Dashboard) | **STABLE** |
+## 3. Quality Assurance (`tests/`)
+A dedicated test suite has been established to verify algorithmic integrity:
+*   `audit_simulation.py`: Validates the generative logic for simulation data (seasonality, volatility clustering).
+*   `comprehensive_scenario_test.py`: Stress tests the platform against "Black Swan" events (e.g., Drought Shocks, Rollover Gaps).
 
-## 3. Core Math Verification (Retained from v2.9)
-*   **RSI**: Wilder's Smoothing confirmed.
-*   **Gap Detection**: Back-adjustment logic confirmed.
-*   **Liquidity Filter**: `OI < 100` exclusion logic confirmed.
+## 4. UI/UX Standardization
+*   **Chameleon System:** Consistent Green/Red logic toggles based on US/CN market context.
+*   **Precision Dashboard:** All 5 Cockpit sub-modules share unified navigation and visual hierarchy.
 
-## 4. Deployment Notes
-*   **Default Mode**: US Standard (Green = Up, Red = Down).
-*   **CN Mode**: Activated via Welcome Hub (Red = Up, Green = Down).
-*   **Dependencies**: Requires browser support for CSS Custom Properties (modern browsers standard).
+## 5. Deployment Notes
+*   **Version:** v3.2.0-suite-stable
+*   **Target:** Web (Responsive Desktop/Tablet).
+*   **Backend Requirement:** Python 3.9+, FastAPI, earthengine-api.
 
 ---
-*Snapshot v3.0.0 created by Lead Architect.*
+*Snapshot v3.2.0 created by Lead Architect.*

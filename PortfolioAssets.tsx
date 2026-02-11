@@ -1,5 +1,6 @@
 
-import React from 'react';
+import React, { useState } from 'react';
+import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
 import { getTrendColor } from './GlobalState';
 
@@ -8,6 +9,35 @@ interface PortfolioAssetsProps {
 }
 
 export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) => {
+  const [gateway, setGateway] = useState<'SIMULATION' | 'CTP_REAL' | 'IBKR'>('SIMULATION');
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationTip, setOptimizationTip] = useState<string | null>(null);
+
+  const runOptimization = async () => {
+      if (!process.env.API_KEY) return;
+      setIsOptimizing(true);
+      try {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const prompt = `
+            Act as a Portfolio Manager.
+            Current Allocation: 45% Corn, 30% Soybeans, 25% Wheat.
+            Context: Corn and Soy have high correlation (0.85).
+            
+            Suggest ONE specific rebalancing action to reduce risk while maintaining exposure.
+            Max 2 sentences.
+          `;
+          const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: prompt
+          });
+          setOptimizationTip(response.text);
+      } catch (e) {
+          setOptimizationTip("Optimization Service Unavailable.");
+      } finally {
+          setIsOptimizing(false);
+      }
+  };
+
   const navItems = [
     { label: 'Data Source', icon: 'database', view: 'dataSource' as const },
     { label: 'Algorithm', icon: 'precision_manufacturing', view: 'algorithm' as const },
@@ -26,41 +56,41 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
   return (
     <div className="bg-[#0a0c10] text-white font-['Space_Grotesk'] h-screen flex flex-col overflow-hidden selection:bg-[#0d59f2]/30">
       {/* Global Header */}
-      <header className="flex items-center justify-between border-b border-[#222f49] bg-[#0a0c10] px-6 h-16 shrink-0 z-50">
-        <div className="flex items-center gap-3 w-1/4 cursor-pointer group" onClick={() => onNavigate('hub')}>
+      <nav className="h-16 border-b border-[#222f49] bg-[#0a0c10] px-6 flex items-center justify-between z-[60] shrink-0">
+        <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
           <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col leading-none">
-            <h1 className="text-white text-xl font-bold tracking-tight">QuantAgrify</h1>
-            <span className="text-[9px] text-[#90a4cb] font-bold tracking-[0.2em] uppercase mt-1">WEALTH FROM AGRI</span>
+          <div className="flex flex-col text-left leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
+            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
-
-        <nav className="flex-1 flex justify-center items-center gap-10 h-full">
+        
+        <div className="flex items-center gap-10 h-full">
           {navItems.map((item) => (
-            <button
+            <button 
               key={item.label}
               onClick={() => item.view !== 'cockpit' && onNavigate(item.view)}
-              className={`h-full flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-all relative border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
+              className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
               <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}
             </button>
           ))}
-        </nav>
+        </div>
 
-        <div className="flex items-center justify-end gap-4 w-1/4">
+        <div className="flex items-center gap-4 w-80 justify-end">
           <SystemClock />
           <div className="h-8 w-px bg-[#222f49] mx-2"></div>
-          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
+          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer hover:border-[#0d59f2] transition-colors">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>
         </div>
-      </header>
+      </nav>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar */}
+        {/* Left Sidebar - STANDARDIZED */}
         <aside className="w-20 border-r border-[#222f49] bg-[#0a0c10] flex flex-col items-center py-6 gap-8 shrink-0">
           {sideNavItems.map(item => (
             <div 
@@ -68,13 +98,13 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
               onClick={() => item.view && onNavigate(item.view)}
               className={`group flex flex-col items-center gap-1 cursor-pointer transition-colors ${item.active ? 'text-[#0d59f2]' : 'text-[#90a4cb] hover:text-white'}`}
             >
-              <div className={`p-2.5 rounded-xl ${item.active ? 'bg-[#0d59f2] text-white shadow-[0_0_15px_rgba(13,89,242,0.3)]' : 'hover:bg-[#182234]'}`}>
+              <div className={`p-2.5 rounded-xl transition-all ${item.active ? 'bg-[#0d59f2] text-white shadow-[0_0_15px_rgba(13,89,242,0.3)]' : 'hover:bg-[#182234]'}`}>
                 <span className="material-symbols-outlined">{item.icon}</span>
               </div>
-              <span className="text-[10px] font-bold">{item.label}</span>
+              <span className="text-[10px] font-bold uppercase tracking-tighter">{item.label}</span>
             </div>
           ))}
-          <div className="mt-auto flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
+          <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
             <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
             <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
           </div>
@@ -90,16 +120,20 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                 Consolidated Asset Overview & Margin Tracking
               </p>
             </div>
-            <div className="flex gap-4">
-              <div className="bg-[#182234] border border-[#222f49] rounded-lg p-3 px-6 text-right">
-                <span className="text-[10px] text-[#90a4cb] uppercase font-black tracking-widest block mb-1 leading-none">Total Net Liquidity</span>
-                <span className="text-2xl font-bold text-white tabular-nums">$1,248,502.40</span>
-              </div>
+            {/* Gateway Status Module (NEW) */}
+            <div className="flex gap-4 items-center bg-[#182234] border border-[#222f49] rounded-lg p-2 px-4">
+                <span className="text-[9px] text-[#90a4cb] uppercase font-bold">Execution Gateway:</span>
+                <div className="flex gap-2">
+                    <button onClick={() => setGateway('SIMULATION')} className={`size-3 rounded-full ${gateway === 'SIMULATION' ? 'bg-[#0d59f2] shadow-[0_0_5px_#0d59f2]' : 'bg-[#314368]'}`} title="Simulation"></button>
+                    <button onClick={() => setGateway('CTP_REAL')} className={`size-3 rounded-full ${gateway === 'CTP_REAL' ? 'bg-[#0bda5e] shadow-[0_0_5px_#0bda5e]' : 'bg-[#314368]'}`} title="CTP (Real)"></button>
+                    <button onClick={() => setGateway('IBKR')} className={`size-3 rounded-full ${gateway === 'IBKR' ? 'bg-[#ffb347] shadow-[0_0_5px_#ffb347]' : 'bg-[#314368]'}`} title="IBKR"></button>
+                </div>
+                <span className="text-[10px] font-mono text-white font-bold">{gateway === 'SIMULATION' ? 'SIM MODE (Local)' : gateway === 'CTP_REAL' ? 'CTP (Direct)' : 'IBKR (Gateway)'}</span>
             </div>
           </div>
 
           <div className="grid grid-cols-12 gap-6">
-            {/* Allocation Section */}
+            {/* Allocation Section with Optimization Doctor */}
             <div className="col-span-12 lg:col-span-4">
               <div className="bg-[#182234] border border-[#222f49] rounded-xl p-6 h-full flex flex-col">
                 <h3 className="text-sm font-black uppercase tracking-[0.15em] text-[#90a4cb] mb-8 flex items-center gap-2">
@@ -118,20 +152,26 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                       <span className="text-2xl font-black text-white mt-1">$1.2M</span>
                     </div>
                   </div>
-                  <div className="mt-10 w-full space-y-4">
-                    {[
-                      { label: 'Corn (ZC)', val: '45.0%', color: 'bg-[#0d59f2]' },
-                      { label: 'Soybeans (ZS)', val: '30.0%', color: 'bg-[#0bda5e]' },
-                      { label: 'Wheat (ZW)', val: '25.0%', color: 'bg-[#fa6238]' }
-                    ].map(item => (
-                      <div key={item.label} className="flex items-center justify-between px-2">
-                        <div className="flex items-center gap-3">
-                          <span className={`size-2.5 rounded-full ${item.color} shadow-[0_0_8px_rgba(0,0,0,0.5)]`}></span>
-                          <span className="text-xs font-bold text-white uppercase tracking-tight">{item.label}</span>
-                        </div>
-                        <span className="text-xs font-black text-white tabular-nums">{item.val}</span>
+                  
+                  {/* Optimization Doctor */}
+                  <div className="w-full mt-6 bg-[#101622] p-3 rounded-lg border border-[#314368] flex flex-col gap-2">
+                      <div className="flex justify-between items-center">
+                          <span className="text-[9px] font-bold text-[#90a4cb] uppercase flex items-center gap-1">
+                              <span className="material-symbols-outlined text-xs text-[#0d59f2]">medical_services</span> Optimization Doctor
+                          </span>
+                          <button 
+                            onClick={runOptimization} 
+                            disabled={isOptimizing}
+                            className="text-[9px] text-white bg-[#0d59f2] px-2 py-1 rounded hover:bg-[#1a66ff]"
+                          >
+                              {isOptimizing ? 'Scanning...' : 'Scan Portfolio'}
+                          </button>
                       </div>
-                    ))}
+                      {optimizationTip && (
+                          <p className="text-[10px] text-slate-300 leading-tight border-l-2 border-[#0bda5e] pl-2">
+                              {optimizationTip}
+                          </p>
+                      )}
                   </div>
                 </div>
               </div>
@@ -176,27 +216,7 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
               </div>
             </div>
 
-            {/* Margin Statistics */}
-            <div className="col-span-12">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                {[
-                  { label: 'Settled Cash', val: '$342,100.00', color: 'border-l-[#0d59f2]' },
-                  { label: 'Available Margin', val: '$840,402.40', color: 'border-l-[#0bda5e]', detail: '67% Free', detailColor: 'text-[#0bda5e]' },
-                  { label: 'Margin Used', val: '$408,100.00', color: 'border-l-[#fa6238]', detail: '33% Used', detailColor: 'text-[#fa6238]' },
-                  { label: 'Portfolio Leverage', val: '3.2x', color: 'border-l-white/20', detail: 'Limit: 10x', detailColor: 'text-[#90a4cb]' }
-                ].map(stat => (
-                  <div key={stat.label} className={`bg-[#182234] border border-[#222f49] rounded-xl p-5 border-l-4 ${stat.color} transition-all hover:translate-y-[-2px]`}>
-                    <span className="text-[10px] text-[#90a4cb] uppercase font-black tracking-widest block mb-2 leading-none">{stat.label}</span>
-                    <div className="flex items-baseline gap-3">
-                      <span className="text-xl font-black text-white tabular-nums">{stat.val}</span>
-                      {stat.detail && <span className={`text-[10px] ${stat.detailColor} font-black uppercase tracking-tighter`}>{stat.detail}</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Active Positions Table */}
+            {/* Active Positions Table (kept similar to before but with improved styling) */}
             <div className="col-span-12">
               <div className="bg-[#182234] border border-[#222f49] rounded-xl overflow-hidden shadow-2xl">
                 <div className="p-5 border-b border-[#222f49] flex justify-between items-center bg-[#101622]/50 backdrop-blur-sm">
@@ -223,13 +243,9 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                       {[
                         { symbol: 'ZC', name: 'Corn Futures', contract: 'Dec 24 (ZCZ4)', side: 'Long', size: '50 Contracts', entry: '458.50', market: '462.25', pnl: '+$18,750.00', pnlPct: '+3.2%', lev: '5.0x' },
                         { symbol: 'ZS', name: 'Soybean Futures', contract: 'Nov 24 (ZSX4)', side: 'Short', size: '20 Contracts', entry: '1,192.00', market: '1,184.50', pnl: '+$7,500.00', pnlPct: '+0.6%', lev: '3.0x' },
-                        { symbol: 'ZW', name: 'Wheat Futures', contract: 'Sep 24 (ZUU4)', side: 'Long', size: '35 Contracts', entry: '548.75', market: '542.75', pnl: '-$10,500.00', pnlPct: '-1.1%', lev: '2.5x' }
                       ].map((pos, i) => {
                           const pnlValue = parseFloat(pos.pnlPct.replace('%', ''));
                           const trendColor = getTrendColor(pnlValue, 'text');
-                          // Calculate background trend color manually for Tailwind arbitrary values since getTrendColor handles text
-                          // For backgrounds, we use var(--trend-up/down) with opacity
-                          const trendBg = pnlValue >= 0 ? 'bg-[var(--trend-up)]/10 border-[var(--trend-up)]/20' : 'bg-[var(--trend-down)]/10 border-[var(--trend-down)]/20';
                           
                           return (
                             <tr key={i} className="hover:bg-white/[0.03] transition-colors group">
@@ -255,7 +271,7 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                                 <span className={`block text-[10px] font-black ${trendColor} mt-0.5`}>{pos.pnlPct}</span>
                               </td>
                               <td className="px-6 py-4 text-center">
-                                <span className="text-[11px] font-black text-white px-2 py-0.5 border border-[#222f49] rounded tabular-nums bg-[#0a0c10]/40 group-hover:border-[#0d59f2]/40 transition-colors">{pos.lev}</span>
+                                <span className="text-[11px] font-black text-white px-2 py-0.5 border border-[#222f49] rounded tabular-nums bg-[#0a0c10]/40">{pos.lev}</span>
                               </td>
                             </tr>
                           );
@@ -268,34 +284,6 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
           </div>
         </main>
       </div>
-
-      {/* Footer PnL Bar */}
-      <footer className="h-8 bg-[#0a0c10] border-t border-[#222f49] flex items-center gap-8 px-6 overflow-hidden whitespace-nowrap shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-[#90a4cb] uppercase tracking-[0.2em]">Portfolio PnL (24h):</span>
-          <span className={`text-[11px] font-black ${getTrendColor(1.28)} tabular-nums`}>+$15,750.40 (+1.28%)</span>
-        </div>
-        <div className="flex gap-8 text-[11px] font-black items-center ml-auto">
-          <div className="flex items-center gap-2">
-            <span className="text-[#90a4cb] uppercase tracking-tighter">CORN (ZC)</span>
-            <span className={getTrendColor(1.2)}>462.25 (+1.2%)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[#90a4cb] uppercase tracking-tighter">WHEAT (ZW)</span>
-            <span className={getTrendColor(-0.8)}>542.75 (-0.8%)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[#90a4cb] uppercase tracking-tighter">SOYBEANS (ZS)</span>
-            <span className={getTrendColor(0.3)}>1,184.50 (+0.3%)</span>
-          </div>
-        </div>
-      </footer>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #222f49; border-radius: 10px; }
-      `}</style>
     </div>
   );
 };

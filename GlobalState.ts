@@ -64,6 +64,15 @@ export const CUSTOM_UPLOAD_STATE = {
     storageUsed: 0
 };
 
+// === NEW: COCKPIT VIEW CACHE (Persistence) ===
+export const COCKPIT_VIEW_CACHE = {
+    chartData: [] as any[],
+    logs: [] as any[],
+    neuralState: 'IDLE' as 'IDLE' | 'SCANNING' | 'ANALYZING' | 'EXECUTING',
+    botConfidence: 0,
+    initialized: false
+};
+
 // 2. Shared Exchange Configuration
 export const EXCHANGE_MAPPING: Record<string, { name: string, varieties: { code: string, name: string }[] }> = {
     '.XDCE': {
@@ -288,6 +297,29 @@ export interface RiskAnalysisPackage {
     };
     timestamp: number;
 }
+
+// === NEW: LIVE TRADING STATE (For Cockpit) ===
+export const LIVE_TRADING_STATE = {
+    isDeployed: false,
+    strategyId: 'LIVE-001',
+    activeAsset: 'CORN (ZC)',
+    currentSignal: 'LONG',
+    signalStrength: 85,
+    lastPrice: 462.25,
+    entryPrice: 458.00,
+    pnl: 1.2, // %
+    riskUsage: 45, // %
+    factors: [
+        { name: 'Weather', contribution: 0.4 },
+        { name: 'Momentum', contribution: 0.3 },
+        { name: 'Carry', contribution: 0.3 }
+    ],
+    logs: [
+        { time: '14:30:05', msg: 'Signal Update: Strong Buy confirmed by Weather factor.' },
+        { time: '14:28:10', msg: 'Risk Check: Volatility within limits (12%).' },
+        { time: '14:25:00', msg: 'Market Data: Tick stream active.' }
+    ]
+};
 
 export interface DataLayerPoint {
     date: string;

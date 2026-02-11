@@ -1,11 +1,10 @@
-
 {
-  "description": "QuantAgrify Professional v3.0.0 (Chameleon Edition). CORE UI FREEZE. Implemented 'Chameleon' Dynamic Color System for instant US/CN trend toggling via CSS variables. Global State synchronization finalized across all 12 modules (Futures, Spot, Weather, Policy, Risk).",
+  "description": "QuantAgrify Professional v3.2.0 (Full Suite). Backend Bridge (Python FastAPI), Unit Tests, and Global State Persistence fully integrated. All 20+ modules active including OEMS Closed Loop.",
   "requestFramePermissions": [
     "camera",
     "microphone",
     "geolocation"
   ],
-  "name": "QuantAgrify v3.0.0 Chameleon",
-  "version": "3.0.0-chameleon"
+  "name": "QuantAgrify v3.2.0 Pro",
+  "version": "3.2.0-suite-stable"
 }

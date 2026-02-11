@@ -40,7 +40,16 @@ const AVAILABLE_ASSETS = [
 ];
 
 export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
-  const navItems = [
+  // Standard Header Items
+  const headerNavItems = [
+    { label: 'Data Source', icon: 'database', view: 'dataSource' as const },
+    { label: 'Algorithm', icon: 'precision_manufacturing', view: 'algorithm' as const },
+    { label: 'Cockpit', icon: 'monitoring', view: 'cockpit' as const },
+    { label: 'API Console', icon: 'terminal', view: 'api' as const }
+  ];
+
+  // Detailed Card Items for the Body
+  const cardItems = [
     { id: 'dataSource', label: 'Data Source', icon: 'database', cardIcon: 'database_off', desc: 'Unified stream management for multispectral imagery, weather grids, and historical series.' },
     { id: 'algorithm', label: 'Algorithm', icon: 'precision_manufacturing', cardIcon: 'precision_manufacturing', desc: 'Orchestrate hybrid intelligence pipelines using Bayesian inference and XGBoost ensembles.' },
     { id: 'cockpit', label: 'Cockpit', icon: 'monitoring', cardIcon: 'monitoring', desc: 'Real-time multi-asset oversight with proprietary signal alerts and precision backtesting.' },
@@ -93,7 +102,7 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#05070a] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col relative selection:bg-[#0d59f2]/30">
+    <div className="min-h-screen bg-[#0a0c10] text-white font-['Space_Grotesk'] overflow-hidden flex flex-col relative selection:bg-[#0d59f2]/30">
       {/* Cyber Grid Pattern */}
       <div className="absolute inset-0 pointer-events-none opacity-[0.05]" 
            style={{ 
@@ -101,39 +110,35 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
              backgroundSize: '40px 40px'
            }}></div>
 
-      {/* Navigation Bar - Refined and Centered */}
-      <nav className="h-16 border-b border-[#222f49] bg-[#0a0e17]/80 backdrop-blur-2xl px-6 flex items-center justify-between z-[100] relative">
-        {/* Left Side: Standardized Logo */}
+      {/* Global Precision Header - Standardized */}
+      <nav className="h-16 border-b border-[#222f49] bg-[#0a0c10] px-6 flex items-center justify-between z-[60] shrink-0">
         <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub' as any)}>
-          <div className="bg-[#0d59f2] p-1.5 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform flex items-center justify-center size-10">
-            <span className="material-symbols-outlined text-white text-2xl" style={{ fontVariationSettings: "'FILL' 1" }}>agriculture</span>
+          <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
+            <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-xl font-bold text-white tracking-tight">QuantAgrify</span>
-            <span className="text-[9px] font-bold text-white tracking-[0.2em] uppercase mt-1">WEALTH FROM AGRI</span>
+          <div className="flex flex-col text-left leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
+            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
         
-        {/* Center: Centered Menu Items */}
-        <div className="flex-1 flex justify-center items-center gap-8 h-full">
-          {navItems.map((item) => (
+        <div className="flex items-center gap-10 h-full">
+          {headerNavItems.map((item) => (
             <button 
-              key={item.id} 
-              onClick={() => onNavigate(item.id as any)}
-              className="flex items-center gap-2 text-sm font-medium text-[#90a4cb] hover:text-white transition-all group relative h-16"
+              key={item.label}
+              onClick={() => onNavigate(item.view as any)}
+              className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 border-transparent text-[#90a4cb] hover:text-white`}
             >
-              <span className="material-symbols-outlined text-[20px] group-hover:text-[#0d59f2]">{item.icon}</span>
+              <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}
-              <div className="absolute bottom-0 left-0 w-0 h-[2px] bg-[#0d59f2] transition-all group-hover:w-full"></div>
             </button>
           ))}
         </div>
-        
-        {/* Right Side: Standardized Clock and User Profile */}
-        <div className="flex items-center justify-end gap-4 w-80">
+
+        <div className="flex items-center gap-4 w-80 justify-end">
           <SystemClock />
           <div className="h-8 w-px bg-[#222f49] mx-2"></div>
-          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden cursor-default">
+          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer hover:border-[#0d59f2] transition-colors">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>
         </div>
@@ -179,7 +184,7 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
 
         {/* Functional Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-[1280px]">
-          {navItems.map((item) => (
+          {cardItems.map((item) => (
             <div 
               key={item.id} 
               onClick={() => onNavigate(item.id as any)}
@@ -302,6 +307,9 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
       </main>
 
       <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #314368; border-radius: 10px; }
         @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
       `}</style>
     </div>

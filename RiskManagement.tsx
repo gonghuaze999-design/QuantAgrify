@@ -23,52 +23,47 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
     { label: 'Assets', icon: 'layers', view: 'portfolioAssets' as const }
   ];
 
-  // VaR Gauges use CSS variables now. 
-  // Note: VaR is "Risk", usually negative/bad is RED. But in "Trend Color" logic, 
-  // if risk increases (bad), it aligns with "Down/Bad" -> Red in US, Green in CN? 
-  // Actually, Risk is always Bad. Let's keep VaR colors consistent with "Bad = Trend Down Color" 
-  // so the user knows what "Red" means in their context.
   const varGauges = [
-    { label: 'Daily VaR', val: '2.4%', color: 'var(--trend-up)', offset: 180 }, // Low risk = Good = Up Color
-    { label: 'Weekly VaR', val: '8.1%', color: '#ffb347', offset: 100 }, // Medium = Yellow
-    { label: 'Monthly VaR', val: '14.2%', color: 'var(--trend-down)', offset: 40 } // High Risk = Bad = Down Color
+    { label: 'Daily VaR', val: '2.4%', color: 'var(--trend-up)', offset: 180 },
+    { label: 'Weekly VaR', val: '8.1%', color: '#ffb347', offset: 100 },
+    { label: 'Monthly VaR', val: '14.2%', color: 'var(--trend-down)', offset: 40 }
   ];
 
   return (
     <div className="bg-[#0a0c10] text-white font-['Space_Grotesk'] h-screen flex flex-col overflow-hidden selection:bg-[#0d59f2]/30">
       {/* Global Header */}
-      <header className="flex items-center justify-between border-b border-[#222f49] bg-[#0a0c10] px-6 h-16 shrink-0 z-50">
-        <div className="flex items-center gap-3 w-1/4 cursor-pointer group" onClick={() => onNavigate('hub')}>
+      <nav className="h-16 border-b border-[#222f49] bg-[#0a0c10] px-6 flex items-center justify-between z-[60] shrink-0">
+        <div className="flex items-center gap-3 w-80 cursor-pointer group" onClick={() => onNavigate('hub')}>
           <div className="flex items-center justify-center bg-[#0d59f2] w-10 h-10 rounded-lg shadow-lg shadow-[#0d59f2]/20 group-hover:scale-105 transition-transform">
             <span className="material-symbols-outlined text-white text-2xl">agriculture</span>
           </div>
-          <div className="flex flex-col leading-none">
-            <h1 className="text-white text-xl font-bold tracking-tight">QuantAgrify</h1>
-            <span className="text-[9px] text-[#90a4cb] font-bold tracking-[0.2em] uppercase mt-1">WEALTH FROM AGRI</span>
+          <div className="flex flex-col text-left leading-none">
+            <h1 className="text-xl font-bold tracking-tight text-white">QuantAgrify</h1>
+            <span className="text-[9px] font-bold tracking-[0.2em] text-[#90a4cb] uppercase mt-1">WEALTH FROM AGRI</span>
           </div>
         </div>
-
-        <nav className="flex-1 flex justify-center items-center gap-10 h-full">
+        
+        <div className="flex items-center gap-10 h-full">
           {navItems.map((item) => (
-            <button
+            <button 
               key={item.label}
               onClick={() => item.view !== 'cockpit' && onNavigate(item.view)}
-              className={`h-full flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-all relative border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
+              className={`h-full flex items-center gap-2 px-1 text-sm font-bold uppercase tracking-wider transition-all border-b-2 ${item.active ? 'border-[#0d59f2] text-[#0d59f2]' : 'border-transparent text-[#90a4cb] hover:text-white'}`}
             >
               <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
               {item.label}
             </button>
           ))}
-        </nav>
+        </div>
 
-        <div className="flex items-center justify-end gap-4 w-1/4">
+        <div className="flex items-center gap-4 w-80 justify-end">
           <SystemClock />
           <div className="h-8 w-px bg-[#222f49] mx-2"></div>
-          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden">
+          <div className="size-8 rounded-full bg-[#222f49] border border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer hover:border-[#0d59f2] transition-colors">
             <span className="material-symbols-outlined text-sm">person</span>
           </div>
         </div>
-      </header>
+      </nav>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left Sidebar */}
@@ -77,15 +72,15 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
             <div 
               key={item.label} 
               onClick={() => item.view && onNavigate(item.view)}
-              className={`group flex flex-col items-center gap-1 cursor-pointer transition-colors ${item.active ? 'text-[var(--trend-down)]' : 'text-[#90a4cb] hover:text-white'}`}
+              className={`group flex flex-col items-center gap-1 cursor-pointer transition-colors ${item.active ? 'text-[#0d59f2]' : 'text-[#90a4cb] hover:text-white'}`}
             >
-              <div className={`p-2.5 rounded-xl ${item.active ? 'bg-[var(--trend-down)] text-white shadow-[0_0_15px_rgba(250,98,56,0.3)]' : 'hover:bg-[#182234]'}`}>
+              <div className={`p-2.5 rounded-xl transition-all ${item.active ? 'bg-[#0d59f2] text-white shadow-[0_0_15px_rgba(13,89,242,0.3)]' : 'hover:bg-[#182234]'}`}>
                 <span className="material-symbols-outlined">{item.icon}</span>
               </div>
-              <span className={`text-[10px] font-bold uppercase tracking-tighter ${item.active ? 'text-[var(--trend-down)]' : ''}`}>{item.label}</span>
+              <span className="text-[10px] font-bold uppercase tracking-tighter">{item.label}</span>
             </div>
           ))}
-          <div className="mt-auto flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
+          <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
             <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
             <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
           </div>
@@ -100,10 +95,6 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                 <span className="material-symbols-outlined text-xs text-[#ffb347] fill-1">warning</span>
                 System Exposure Monitoring — 4 Active Warnings
               </p>
-            </div>
-            <div className="flex gap-2">
-              <button className="bg-[#182234] border border-[#222f49] px-4 py-2 rounded text-xs font-bold uppercase hover:bg-[#222f49] transition-colors text-white">Risk Report PDF</button>
-              <button className="bg-[var(--trend-down)] px-4 py-2 rounded text-xs font-bold uppercase text-white shadow-lg shadow-[var(--trend-down)]/20 hover:opacity-90 transition-all">Emergency De-risk</button>
             </div>
           </div>
 
@@ -134,29 +125,35 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
               </div>
             </div>
 
-            {/* Margin Utilization Section */}
+            {/* Event Radar (NEW) */}
             <div className="col-span-12 lg:col-span-6">
-              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-5 h-full">
+              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-5 h-full flex flex-col">
                 <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-[#90a4cb]">Margin Utilization by Exchange</h3>
-                  <span className="text-[10px] font-black text-[#ffb347] uppercase tracking-tighter bg-[#ffb347]/10 px-2 py-0.5 rounded border border-[#ffb347]/20 animate-pulse">Warning: CBOT Near Limit</span>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-[#90a4cb] flex items-center gap-2">
+                      <span className="material-symbols-outlined text-sm text-[#0d59f2]">radar</span>
+                      Predictive Event Radar (72h)
+                  </h3>
                 </div>
-                <div className="space-y-6 mt-4">
-                  {[
-                    { label: 'CBOT (Chicago)', val: '88%', color: 'bg-[var(--trend-down)]' },
-                    { label: 'ICE (Atlanta)', val: '42%', color: 'bg-[#0d59f2]' },
-                    { label: 'MATIF (Paris)', val: '15%', color: 'bg-[#0d59f2]' }
-                  ].map(row => (
-                    <div key={row.label} className="space-y-2">
-                      <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
-                        <span className="text-white">{row.label}</span>
-                        <span className={row.val === '88%' ? 'text-[var(--trend-down)]' : 'text-white'}>{row.val}</span>
-                      </div>
-                      <div className="h-2 w-full bg-[#222f49] rounded-full overflow-hidden">
-                        <div className={`h-full ${row.color} transition-all duration-1000 ease-out`} style={{ width: row.val }}></div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
+                    {[
+                        { time: 'T-4h', event: 'USDA WASDE Report', impact: 'HIGH', type: 'Macro' },
+                        { time: 'T-18h', event: 'Fed Interest Rate Decision', impact: 'HIGH', type: 'Macro' },
+                        { time: 'T-26h', event: 'Brazil Port Strike Vote', impact: 'MED', type: 'Logistics' },
+                        { time: 'T-48h', event: 'MPOB Palm Oil Data', impact: 'LOW', type: 'Supply' },
+                    ].map((evt, i) => (
+                        <div key={i} className="flex items-center gap-4 p-2 rounded bg-[#101622] border border-[#222f49]">
+                            <span className="text-xs font-bold text-[#0d59f2] w-12">{evt.time}</span>
+                            <div className="flex-1">
+                                <span className="text-xs font-bold text-white block">{evt.event}</span>
+                                <span className="text-[9px] text-[#90a4cb] uppercase">{evt.type}</span>
+                            </div>
+                            <span className={`text-[9px] font-black px-2 py-1 rounded border uppercase ${
+                                evt.impact === 'HIGH' ? 'text-[#fa6238] border-[#fa6238] bg-[#fa6238]/10' :
+                                evt.impact === 'MED' ? 'text-[#ffb347] border-[#ffb347] bg-[#ffb347]/10' :
+                                'text-[#0bda5e] border-[#0bda5e] bg-[#0bda5e]/10'
+                            }`}>{evt.impact} Impact</span>
+                        </div>
+                    ))}
                 </div>
               </div>
             </div>
@@ -173,6 +170,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                 </div>
                 
                 <div className="h-[300px] w-full relative">
+                  {/* Static SVG Placeholder for complex D3 visual */}
                   <svg className="w-full h-full opacity-60">
                     <line stroke="var(--trend-down)" strokeDasharray="4" strokeWidth="3" x1="20%" y1="30%" x2="50%" y2="50%" />
                     <line stroke="#0d59f2" strokeWidth="1" x1="80%" y1="30%" x2="50%" y2="50%" />
@@ -193,12 +191,6 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                     <div className="size-10 rounded-full bg-[#0d59f2]/20 border-2 border-[#0d59f2] flex items-center justify-center text-[9px] font-black">FERT</div>
                   </div>
                 </div>
-
-                <div className="absolute bottom-6 left-6 text-[9px] font-black uppercase tracking-widest text-[#90a4cb] flex gap-4 bg-[#0a0c10]/40 p-2 rounded">
-                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--trend-down)]"></span> Strong Correlation</span>
-                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[#0d59f2]"></span> Neutral</span>
-                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-[var(--trend-up)]"></span> Strong Negative</span>
-                </div>
               </div>
             </div>
 
@@ -208,9 +200,9 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                 <h3 className="text-sm font-bold uppercase tracking-wider text-[#90a4cb] mb-6">Stress Test Scenarios</h3>
                 <div className="space-y-4 flex-1">
                   {[
-                    { label: 'Price Crash (-10%)', val: '-$1.2M', desc: 'Estimated impact of sudden liquidity withdrawal in major ag-exchanges.', color: getTrendColor(-1200000, 'text') },
-                    { label: 'Sudden Drought (Brazil)', val: '-$420K', desc: 'Impact on Soybean futures due to supply shock and yield downward revisions.', color: getTrendColor(-420000, 'text') },
-                    { label: 'Rate Hike (+50bps)', val: '+$112K', desc: 'USD strength impact on international export contracts hedging.', color: getTrendColor(112000, 'text') }
+                    { label: 'Price Crash (-10%)', val: '-$1.2M', desc: 'Estimated impact of sudden liquidity withdrawal.', color: getTrendColor(-1200000, 'text') },
+                    { label: 'Sudden Drought (Brazil)', val: '-$420K', desc: 'Impact on Soybean futures due to supply shock.', color: getTrendColor(-420000, 'text') },
+                    { label: 'Rate Hike (+50bps)', val: '+$112K', desc: 'USD strength impact on export hedging.', color: getTrendColor(112000, 'text') }
                   ].map((scenario, i) => (
                     <div key={i} className={`p-3 bg-[#0a0c10]/40 border-l-4 rounded-r-lg group hover:bg-[#0a0c10] transition-colors`} style={{ borderLeftColor: 'var(--trend-down)' }}>
                       <div className="flex justify-between items-start mb-1">
@@ -229,37 +221,6 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
           </div>
         </main>
       </div>
-
-      {/* Footer Ticker */}
-      <footer className="h-8 bg-[#0a0c10] border-t border-[#222f49] flex items-center gap-8 px-6 overflow-hidden whitespace-nowrap shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-[#90a4cb] uppercase tracking-[0.2em]">Risk Ticker:</span>
-        </div>
-        <div className="flex gap-8 text-[11px] font-bold items-center">
-          <div className="flex items-center gap-1.5">
-            <span className="text-white uppercase">VIX (VOL)</span>
-            <span className={getTrendColor(4.2, 'text')}>24.22 (+4.2%)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-white uppercase">Margin Call Alert</span>
-            <span className="text-[var(--trend-down)] font-black">CBOT-22</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-white uppercase">Drawdown</span>
-            <span className={getTrendColor(-3.8, 'text')}>-3.8% (24h)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-white uppercase">Liquidity Index</span>
-            <span className="text-[var(--trend-up)]">Healthy</span>
-          </div>
-        </div>
-      </footer>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #314368; border-radius: 10px; }
-      `}</style>
     </div>
   );
 };
