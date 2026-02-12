@@ -15,7 +15,7 @@ import {
   Cell,
   Area
 } from 'recharts';
-import { DATA_LAYERS, RiskAnalysisPackage } from './GlobalState';
+import { DATA_LAYERS, RiskAnalysisPackage, DEPLOYED_STRATEGY, DeployedStrategyPackage } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface ModelIterationProps {
@@ -288,7 +288,39 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
 
   const deployToCockpit = () => {
       if (!activeModel) return;
-      alert(`Model ${activeModel.id} deployed to Live Cockpit environment.`);
+      
+      // CONSTRUCT THE OEMS PACKAGE
+      const packagePayload: DeployedStrategyPackage = {
+          meta: {
+              strategyId: `${activeModel.id}-${activeModel.name.replace(/\s+/g, '_')}`,
+              assetSymbol: activeModel.package.sourceAsset,
+              deployTimestamp: Date.now()
+          },
+          logic: {
+              factorWeights: activeModel.package.attribution?.weights || {},
+              riskParams: {
+                  stopLossAtrMultiplier: activeModel.package.config.stopLossMult,
+                  targetVolatility: activeModel.package.config.targetVol
+              }
+          },
+          history: {
+              equityCurve: activeModel.package.timeSeries.map(d => ({ date: d.date, value: d.equity })),
+              // Re-construct the full price series for the simulation engine
+              // The timeSeries from risk layer already contains the underlying price
+              fullSeries: activeModel.package.timeSeries.map(d => ({
+                  date: d.date,
+                  price: d.price,
+                  // Note: Volume might be implicit in price updates or we mock if missing since this is for sim engine continuity
+                  volume: 100000 
+              }))
+          }
+      };
+
+      // WRITE TO GLOBAL STATE
+      DEPLOYED_STRATEGY.content = packagePayload;
+
+      // FEEDBACK & NAVIGATE
+      //alert(`Model ${activeModel.id} deployed to Live Cockpit environment.`);
       onNavigate('cockpit');
   };
 

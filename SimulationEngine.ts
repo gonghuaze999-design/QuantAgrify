@@ -56,6 +56,9 @@ export interface EngineConfig {
     splitTimestamp?: number; 
     initialBalance?: number;
     modelType?: 'MJD' | 'OU'; // Default to OU (Agricultural)
+    // GATEWAY ADAPTER: Determines if we use the internal math engine ('SIM') or connect to an external broker ('REAL')
+    executionGateway?: 'SIM' | 'REAL'; 
+    baseCurrency?: 'USD' | 'CNY'; // Added Base Currency
 }
 
 export interface EngineAlert {
@@ -70,6 +73,15 @@ export interface ActiveStrategy {
     weights: Record<string, number>;
     stopLossMult: number;
     targetVol: number;
+}
+
+// --- NEW: Context Storage for Mode Isolation ---
+interface SimulationContext {
+    ready: boolean;
+    fitParams: any;
+    simulationBuffer: number[];
+    startTime: number;
+    metrics: { score: string, sigma: number };
 }
 
 // --- ADVANCED NUMERICAL MATH (Ornstein-Uhlenbeck Mean Reversion) ---
@@ -178,7 +190,9 @@ export class VirtualExchange {
         symbol: "C2405.XDCE",
         mode: 'SIMULATION',
         initialBalance: 1000000,
-        modelType: 'OU' // Upgraded Default
+        modelType: 'OU', // Upgraded Default
+        executionGateway: 'SIM', // Default to internal matching engine
+        baseCurrency: 'USD' // Default Currency
     };
 
     private leverage: number = 10;
@@ -200,13 +214,19 @@ export class VirtualExchange {
     
     // Data Buffers
     private historicalBuffer: MarketTick[] = []; // Full history from source
-    private simulationBuffer: number[] = [];     // Generated Future path
+    private simulationBuffer: number[] = [];     // Generated Future path (Active)
     private tickIndex: number = 0;               // Current cursor
     
-    // Sim Math State
+    // Active Context State (Hydrated from contexts map)
     private fitParams: any = null;
     private simulationStartTime: number = 0;
-    private lastSimPrice: number = 0; // Tracks last known valid price for sim continuity
+    private lastSimPrice: number = 0; 
+
+    // --- NEW: MODE ISOLATION STORAGE ---
+    private contexts: Record<string, SimulationContext> = {
+        'SIMULATION': { ready: false, fitParams: null, simulationBuffer: [], startTime: 0, metrics: { score: '', sigma: 0 } },
+        'TRAINING': { ready: false, fitParams: null, simulationBuffer: [], startTime: 0, metrics: { score: '', sigma: 0 } }
+    };
 
     // Robot & Risk
     public isRobotActive: boolean = false;
@@ -229,18 +249,82 @@ export class VirtualExchange {
     // --- SETUP & CONTROL ---
 
     public configure(newConfig: Partial<EngineConfig>) {
+        // If mode changes, try to hydrate state from context
+        const modeChanged = newConfig.mode && newConfig.mode !== this.config.mode;
         this.config = { ...this.config, ...newConfig };
         
-        if (newConfig.initialBalance) {
-            this.account.balance = newConfig.initialBalance;
-            this.account.equity = newConfig.initialBalance;
-            this.account.highWaterMark = newConfig.initialBalance;
-            this.account.history = [];
-            this.positions = null;
-            this.orders = [];
-            this.latestAlert = null;
-            this.recentPrices = [];
+        if (modeChanged) {
+            this.hydrateFromContext(this.config.mode);
         }
+
+        if (newConfig.initialBalance) {
+            this.resetAccount(newConfig.initialBalance);
+        }
+    }
+
+    /**
+     * Hard Reset of the Trading Account.
+     * Used by PortfolioAssets page to re-seed capital.
+     */
+    public resetAccount(initialCapital: number) {
+        this.config.initialBalance = initialCapital;
+        this.account.balance = initialCapital;
+        this.account.equity = initialCapital;
+        this.account.marginUsed = 0;
+        this.account.highWaterMark = initialCapital;
+        this.account.history = [];
+        this.positions = null;
+        this.orders = [];
+        this.tradeHistory = [];
+        this.latestAlert = null;
+        this.recentPrices = [];
+        // Note: We do NOT clear the historical data buffer, just the execution state.
+    }
+
+    private hydrateFromContext(mode: EngineMode) {
+        if (mode === 'REAL') {
+            this.simulationBuffer = [];
+            this.simulationStartTime = Date.now();
+            this.fitParams = null;
+            this.tickIndex = 0;
+            return;
+        }
+
+        const ctx = this.contexts[mode];
+        if (ctx && ctx.ready) {
+            this.simulationBuffer = ctx.simulationBuffer;
+            this.simulationStartTime = ctx.startTime;
+            this.fitParams = ctx.fitParams;
+            
+            // Reset Cursor based on Mode Logic
+            if (mode === 'SIMULATION') {
+                // Start exactly after history
+                this.tickIndex = 0; 
+                if (this.simulationBuffer.length > 0) {
+                    this.lastSimPrice = this.simulationBuffer[0];
+                    this.currentTick = { 
+                        time: this.simulationStartTime, 
+                        price: this.simulationBuffer[0], 
+                        volume: 0, 
+                        sourceType: 'SYNTHETIC' 
+                    };
+                }
+            } else if (mode === 'TRAINING') {
+                // Training uses Historical Buffer + Overlay
+                // Determine split index from startTime
+                const splitIndex = this.historicalBuffer.findIndex(t => t.time >= this.simulationStartTime);
+                this.tickIndex = splitIndex !== -1 ? splitIndex : 0;
+                if (this.historicalBuffer[this.tickIndex]) {
+                    this.currentTick = this.historicalBuffer[this.tickIndex];
+                }
+            }
+        }
+    }
+
+    public getContextMetrics(mode: EngineMode) {
+        if (mode === 'REAL') return null;
+        const ctx = this.contexts[mode];
+        return ctx.ready ? ctx.metrics : null;
     }
 
     public setStrategy(strategy: ActiveStrategy) {
@@ -279,68 +363,79 @@ export class VirtualExchange {
         }
     }
 
-    // CORE NUMERICAL SIMULATION - UPGRADED TO OU PROCESS
-    public runNumericalSimulation(): { success: boolean, metrics: any } {
+    // CORE NUMERICAL SIMULATION - UPGRADED TO OU PROCESS WITH ISOLATION
+    public runNumericalSimulation(targetMode?: EngineMode, trainingSplitPercent: number = 80): { success: boolean, metrics: any } {
         if (this.historicalBuffer.length < 20) return { success: false, metrics: null };
+
+        const mode = targetMode || this.config.mode;
+        if (mode === 'REAL') return { success: true, metrics: null };
 
         let trainingData: number[] = [];
         let startPrice = 0;
-        let startTime = 0;
+        let determinedStartTime = 0;
+        let steps = 365;
 
-        // --- 1. Data Splitting ---
-        if (this.config.mode === 'TRAINING' && this.config.splitTimestamp) {
-            // Fit on Pre-Split Data (Train Set)
-            const splitIndex = this.historicalBuffer.findIndex(t => t.time >= this.config.splitTimestamp!);
-            if (splitIndex === -1) return { success: false, metrics: null };
+        // --- 1. Data Splitting Logic ---
+        if (mode === 'TRAINING') {
+            // Calculate Split Timestamp based on Percent
+            const splitIndex = Math.floor(this.historicalBuffer.length * (trainingSplitPercent / 100));
+            const splitTick = this.historicalBuffer[splitIndex];
             
-            this.tickIndex = splitIndex; // Start playback at split point
             trainingData = this.historicalBuffer.slice(0, splitIndex).map(t => t.price);
             startPrice = trainingData[trainingData.length - 1];
-            startTime = this.historicalBuffer[splitIndex].time;
+            determinedStartTime = splitTick.time; // Anchor to the split date
+            steps = this.historicalBuffer.length - splitIndex; // Exact OOS steps
         } else {
-            // SIMULATION: Fit on ALL Data (Full History)
+            // SIMULATION: Fit on Full History
             trainingData = this.historicalBuffer.map(t => t.price);
             startPrice = trainingData[trainingData.length - 1];
-            this.tickIndex = this.historicalBuffer.length - 1; // Start at end
-            startTime = this.historicalBuffer[this.historicalBuffer.length - 1].time;
+            
+            const lastHistoryTime = this.historicalBuffer[this.historicalBuffer.length - 1].time;
+            // Anchor start to T + 1 Day
+            determinedStartTime = lastHistoryTime + (24 * 60 * 60 * 1000); 
+            steps = 365;
         }
 
-        // --- 2. Fit OU Parameters (Mean Reversion) ---
-        // Using the upgraded fitOU method instead of MJD
-        this.fitParams = StochasticMath.fitOU(trainingData);
+        // --- 2. Fit OU Parameters ---
+        const fittedParams = StochasticMath.fitOU(trainingData);
         
         // --- 3. Generate Future Path ---
-        let steps = 365;
-        if (this.config.mode === 'TRAINING') {
-            // Generate exact number of steps remaining in the validation set
-            steps = this.historicalBuffer.length - this.tickIndex;
-        }
-
-        this.simulationBuffer = StochasticMath.generateOUPath(
+        const buffer = StochasticMath.generateOUPath(
             startPrice, 
             steps, 
-            1/252, // Daily step size
-            this.fitParams
+            1/252, 
+            fittedParams
         );
         
-        this.simulationStartTime = startTime;
-
-        // Calculate "Fit Score"
-        // For OU, a high Theta implies strong mean reversion (good for ags). 
-        // A low Sigma implies stable fit.
-        // We synthesize a score 0-100 based on fit confidence.
-        const reversionStrength = Math.min(10, this.fitParams.theta) * 10; 
-        const stability = Math.max(0, 100 - (this.fitParams.sigma * 1000));
+        // Calculate Metrics
+        const reversionStrength = Math.min(10, fittedParams.theta) * 10; 
+        const stability = Math.max(0, 100 - (fittedParams.sigma * 1000));
         const fitScore = (reversionStrength * 0.4 + stability * 0.6);
+        
+        const metricsObj = { 
+            mu: fittedParams.mu.toFixed(2), 
+            theta: fittedParams.theta.toFixed(3), 
+            sigma: fittedParams.sigma.toFixed(3),
+            fitScore: Math.max(10, Math.min(99, fitScore)).toFixed(1)
+        };
+
+        // --- 4. Store in Context ---
+        this.contexts[mode] = {
+            ready: true,
+            fitParams: fittedParams,
+            simulationBuffer: buffer,
+            startTime: determinedStartTime,
+            metrics: { score: metricsObj.fitScore, sigma: parseFloat(metricsObj.sigma) }
+        };
+
+        // If this is the active mode, apply immediately
+        if (mode === this.config.mode) {
+            this.hydrateFromContext(mode);
+        }
 
         return { 
             success: true, 
-            metrics: { 
-                mu: this.fitParams.mu.toFixed(2), 
-                theta: this.fitParams.theta.toFixed(3), 
-                sigma: this.fitParams.sigma.toFixed(3),
-                fitScore: Math.max(10, Math.min(99, fitScore)).toFixed(1)
-            } 
+            metrics: metricsObj
         };
     }
 
@@ -395,7 +490,36 @@ export class VirtualExchange {
     }
 
     public nextTick() {
-        // --- 1. DETERMINE NEXT PRICE (Dual-Track Logic) ---
+        // --- REAL MODE OVERRIDE ---
+        if (this.config.mode === 'REAL') {
+            const now = Date.now();
+
+            // GATEWAY ADAPTER: If connected to a "Real" Execution Gateway (e.g. CTP/IBKR via Python)
+            // We bypass the internal matching engine and purely sync state.
+            if (this.config.executionGateway === 'REAL') {
+                this.mockRealBrokerSync(now);
+                return;
+            }
+
+            // Fallback: Internal Simulated Real Mode (Jitter)
+            // Just simulate jitter around current price based on System Clock
+            // In a real app, this would be a WebSocket push
+            // Simulate random market move
+            const jitter = (Math.random() - 0.5) * 0.5;
+            
+            this.currentTick = {
+                time: now, // Strict System Time
+                price: this.currentTick.price + jitter,
+                volume: Math.floor(Math.random() * 500),
+                sourceType: 'LIVE'
+            };
+            
+            this.lastSimPrice = this.currentTick.price;
+            this.processTickLogic();
+            return;
+        }
+
+        // --- SIMULATION / TRAINING GENERATION ---
         
         if (this.config.mode === 'TRAINING') {
             // Step forward in history
@@ -406,7 +530,9 @@ export class VirtualExchange {
             
             const realTick = this.historicalBuffer[this.tickIndex];
             
-            const splitIndex = this.historicalBuffer.length - this.simulationBuffer.length;
+            // Overlay logic: Match simulationBuffer to the OOS period
+            // Calculate where OOS starts
+            const splitIndex = this.historicalBuffer.findIndex(t => t.time >= this.simulationStartTime);
             const simIdx = this.tickIndex - splitIndex;
             
             let predictedPrice = undefined;
@@ -417,21 +543,22 @@ export class VirtualExchange {
             this.currentTick = {
                 ...realTick,
                 predicted: predictedPrice,
-                sourceType: 'TRAINING_OOS' // Out of Sample
+                sourceType: 'TRAINING_OOS' 
             };
 
         } else if (this.config.mode === 'SIMULATION') {
             // Pure Math Generation
             this.tickIndex++;
+            
+            // Extend buffer if needed (Infinite scroll)
             if (this.tickIndex >= this.simulationBuffer.length) {
-                // Generate infinite future using last known point
                 const last = this.simulationBuffer[this.simulationBuffer.length-1];
                 const newPath = StochasticMath.generateOUPath(last, 100, 1/252, this.fitParams);
                 this.simulationBuffer = [...this.simulationBuffer, ...newPath.slice(1)];
             }
             
-            const price = this.simulationBuffer[this.tickIndex] !== undefined ? this.simulationBuffer[this.tickIndex] : this.lastSimPrice;
-            const time = this.simulationStartTime + (this.tickIndex * 24 * 60 * 60 * 1000); // Daily steps
+            const price = this.simulationBuffer[this.tickIndex];
+            const time = this.simulationStartTime + (this.tickIndex * 24 * 60 * 60 * 1000); // Daily steps from anchor
             
             this.currentTick = {
                 time: time,
@@ -441,9 +568,27 @@ export class VirtualExchange {
             };
         }
 
-        // Update last known price for continuity
         this.lastSimPrice = this.currentTick.price;
+        this.processTickLogic();
+    }
 
+    /**
+     * Mocks the synchronization with an external broker via Gateway.
+     * In a real system, this would be an async state update from a WebSocket stream.
+     */
+    private mockRealBrokerSync(now: number) {
+        // Heartbeat update
+        // We assume the broker handles orders/positions, so we don't processTickLogic here.
+        // We strictly sync what the "Broker" tells us. 
+        this.currentTick = {
+            time: now,
+            price: this.currentTick.price + (Math.random() - 0.5) * 0.1, // Broker feed noise
+            volume: Math.floor(Math.random() * 10),
+            sourceType: 'LIVE'
+        };
+    }
+
+    private processTickLogic() {
         this.recentPrices.push(this.currentTick.price);
         if (this.recentPrices.length > 50) this.recentPrices.shift();
 
@@ -643,6 +788,7 @@ export class VirtualExchange {
             account: this.account,
             positions: this.positions,
             orders: this.orders,
+            tradeHistory: this.tradeHistory, // Expose full trade history
             historyCount: this.historicalBuffer.length,
             alert: this.latestAlert,
             activeStrategyName: this.activeStrategy?.name

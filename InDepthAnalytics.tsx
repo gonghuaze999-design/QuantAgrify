@@ -1,41 +1,89 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { getTrendColor } from './GlobalState';
+import { getTrendColor, DATA_LAYERS } from './GlobalState';
+import { GLOBAL_EXCHANGE } from './SimulationEngine';
+import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 
 interface InDepthAnalyticsProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
 }
 
 export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }) => {
+  // --- LIVE ENGINE SYNC ---
+  const [engineStatus, setEngineStatus] = useState(GLOBAL_EXCHANGE.getStatus());
+  
+  // --- AI STATE ---
   const [narrative, setNarrative] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+      const interval = setInterval(() => {
+          setEngineStatus(GLOBAL_EXCHANGE.getStatus());
+      }, 1000); // 1Hz update
+      return () => clearInterval(interval);
+  }, []);
+
+  const symbol = engineStatus.config.baseCurrency === 'CNY' ? '¥' : '$';
+
+  // --- DERIVED METRICS ---
+  const analytics = useMemo(() => {
+      const trades = engineStatus.tradeHistory;
+      if (!trades || trades.length === 0) return null;
+
+      let grossProfit = 0;
+      let grossLoss = 0;
+      let winPeriods = 0;
+      const history = engineStatus.account.history;
+      
+      // Calculate Equity Curve for Chart
+      const equityCurve = history.map((h, i) => ({
+          index: i,
+          equity: h.equity
+      }));
+
+      for(let i=1; i<history.length; i++) {
+          if (history[i].equity > history[i-1].equity) {
+              winPeriods++;
+              grossProfit += (history[i].equity - history[i-1].equity);
+          } else {
+              grossLoss += (history[i-1].equity - history[i].equity);
+          }
+      }
+      
+      const profitFactor = grossLoss === 0 ? grossProfit : grossProfit / grossLoss;
+      const winRate = history.length > 1 ? (winPeriods / (history.length - 1)) * 100 : 0;
+      const totalPnLPercent = ((engineStatus.account.equity - (engineStatus.config.initialBalance || 1000000)) / (engineStatus.config.initialBalance || 1000000)) * 100;
+
+      return {
+          totalTrades: trades.length,
+          winRate: winRate.toFixed(1),
+          profitFactor: profitFactor.toFixed(2),
+          totalPnL: totalPnLPercent.toFixed(2),
+          grossProfit,
+          grossLoss,
+          equityCurve
+      };
+  }, [engineStatus]);
 
   const generateNarrative = async () => {
       if (!process.env.API_KEY) return;
       setIsGenerating(true);
+      
+      const context = analytics ? `
+        Trading Session Analysis:
+        - Total Trades: ${analytics.totalTrades}
+        - Win Rate (Time-Weighted): ${analytics.winRate}%
+        - Profit Factor: ${analytics.profitFactor}
+        - Total Return: ${analytics.totalPnL}%
+      ` : "No trades executed yet.";
+      
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-          // Mock data context - in real app this comes from props or state
-          const context = `
-            Attribution Data:
-            - Total Return: +14.2%
-            - Weather Factor: +4.2% (Contribution), trend positive.
-            - Macro Factor: -2.1% (Contribution), trend negative due to USD strength.
-            - Momentum Factor: +5.6% (Contribution), strong signal.
-            - Residual: -1.2%
-          `;
-          
           const response = await ai.models.generateContent({
               model: "gemini-3-flash-preview",
-              contents: `
-                Act as a Senior Portfolio Manager.
-                Analyze this attribution data and write a short, professional "Daily Attribution Brief" (max 3 sentences).
-                Explain WHY the return happened.
-                
-                ${context}
-              `
+              contents: `Act as a Portfolio Manager. Write a short professional performance brief (max 3 sentences) based on: ${context}`
           });
           setNarrative(response.text || "Analysis failed.");
       } catch (e) {
@@ -58,15 +106,6 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
     { label: 'Backtest', icon: 'candlestick_chart', view: 'backtestEngine' as const },
     { label: 'Risk Mgmt', icon: 'shield_with_heart', view: 'riskManagement' as const },
     { label: 'Assets', icon: 'layers', view: 'portfolioAssets' as const }
-  ];
-
-  const heatmapData = [
-    [1.0, 0.12, 0.45, 0.82, 0.23, -0.15],
-    [0.12, 1.0, -0.52, 0.05, 0.68, -0.08],
-    [0.45, -0.52, 1.0, 0.18, 0.02, 0.55],
-    [0.82, 0.05, 0.18, 1.0, -0.21, 0.29],
-    [0.23, 0.68, 0.02, -0.21, 1.0, 0.41],
-    [-0.15, -0.08, 0.55, 0.29, 0.41, 1.0]
   ];
 
   return (
@@ -106,7 +145,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
       </nav>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - STANDARDIZED */}
+        {/* Left Sidebar */}
         <aside className="w-20 border-r border-[#222f49] bg-[#0a0c10] flex flex-col items-center py-6 gap-8 shrink-0">
           {sideNavItems.map(item => (
             <div 
@@ -120,10 +159,6 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
               <span className="text-[10px] font-bold uppercase tracking-tighter">{item.label}</span>
             </div>
           ))}
-          <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
-            <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
-            <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
-          </div>
         </aside>
 
         {/* Main Content Area */}
@@ -133,176 +168,182 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
               <h1 className="text-3xl font-black tracking-tight text-white mb-1 uppercase tracking-tighter">In-depth Analytics</h1>
               <p className="text-[#90a4cb] text-sm flex items-center gap-2 font-medium">
                 <span className="material-symbols-outlined text-xs text-[#0d59f2] fill-1">insights</span>
-                Advanced Factor Correlation & Attribution Models
+                Live Session Attribution & Factor Performance
               </p>
             </div>
-            <div className="flex gap-2">
-              <div className="flex bg-[#182234] border border-[#222f49] rounded-lg p-1">
-                <button className="px-4 py-1.5 text-xs font-bold uppercase rounded bg-[#0d59f2] text-white shadow-lg">Full Analysis</button>
-                <button className="px-4 py-1.5 text-xs font-bold uppercase text-[#90a4cb] hover:text-white transition-colors">Raw Data</button>
-              </div>
-            </div>
+            {engineStatus.isRunning && (
+                <span className="text-[10px] text-[#0d59f2] bg-[#0d59f2]/10 px-3 py-1 rounded-full border border-[#0d59f2]/20 animate-pulse font-bold uppercase">
+                    ● Live Stream Active
+                </span>
+            )}
           </div>
 
-          <div className="grid grid-cols-12 gap-6">
-            {/* Correlation Matrix */}
-            <div className="col-span-12 lg:col-span-6 rounded-xl bg-[#182234] border border-[#222f49] p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wide">
-                  <span className="material-symbols-outlined text-[#0d59f2]">grid_view</span>
-                  Factor Correlation Matrix
-                </h3>
-                <span className="text-[10px] text-[#90a4cb] uppercase tracking-widest font-bold">Pearson Coefficients</span>
+          {!analytics ? (
+              <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-[#314368] rounded-xl bg-[#182234]/20 text-[#90a4cb]">
+                  <span className="material-symbols-outlined text-4xl mb-4 opacity-50">query_stats</span>
+                  <p className="text-sm font-bold uppercase tracking-widest">No Trading Data Available</p>
+                  <p className="text-xs mt-2 opacity-70">Execute strategies in the Cockpit to generate analytics.</p>
               </div>
-              <div className="grid grid-cols-6 gap-1 mb-2">
-                {['WTHR', 'MACR', 'TRDF', 'YELD', 'EXPT', 'STCK'].map(tag => (
-                  <div key={tag} className="text-[9px] text-[#90a4cb] uppercase font-black text-center">{tag}</div>
-                ))}
-              </div>
-              <div className="grid grid-cols-6 gap-1">
-                {heatmapData.flat().map((val, i) => {
-                  const isPositive = val >= 0;
-                  const absVal = Math.abs(val);
-                  const bgColor = isPositive ? 'var(--trend-up)' : 'var(--trend-down)';
-                  return (
-                    <div 
-                      key={i} 
-                      className={`aspect-square flex items-center justify-center text-[10px] font-bold rounded-sm ${absVal > 0.5 ? 'text-[#0a0c10]' : 'text-white/70'}`}
-                      style={{ backgroundColor: bgColor, opacity: 0.2 + absVal * 0.8 }}
-                    >
-                      {val.toFixed(2)}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* PnL Attribution & AI Narrative */}
-            <div className="col-span-12 lg:col-span-6 rounded-xl bg-[#182234] border border-[#222f49] p-6 flex flex-col">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wide">
-                  <span className="material-symbols-outlined text-[#0d59f2]">analytics</span>
-                  PnL Attribution (Waterfall)
-                </h3>
-                <span className={`text-xs font-bold uppercase tracking-tighter ${getTrendColor(14.2)}`}>+14.2% Total</span>
-              </div>
-              
-              <div className="h-48 w-full flex items-end gap-4 px-2 mb-6">
-                {[
-                  { label: 'Weather', val: '30%', trend: 1, mb: '0%' },
-                  { label: 'Macro', val: '15%', trend: -1, mb: '30%' },
-                  { label: 'Flow', val: '40%', trend: 1, mb: '15%' },
-                  { label: 'Final', val: '55%', trend: 0, mb: '0%', bold: true }
-                ].map((bar, i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center">
-                    <div 
-                      className={`w-full rounded-t transition-all duration-500`} 
-                      style={{ 
-                          height: bar.val, 
-                          marginBottom: bar.mb,
-                          backgroundColor: bar.trend === 0 ? '#0d59f2' : (bar.trend > 0 ? 'var(--trend-up)' : 'var(--trend-down)'),
-                          opacity: bar.trend === 0 ? 1 : 0.8
-                      }}
-                    ></div>
-                    <span className={`text-[9px] mt-2 uppercase font-bold ${bar.bold ? 'text-white' : 'text-[#90a4cb]'}`}>{bar.label}</span>
+          ) : (
+              <div className="grid grid-cols-12 gap-6">
+                {/* 1. Performance Overview - STRETCHED TO MATCH RIGHT COLUMN */}
+                <div className="col-span-12 lg:col-span-6 rounded-xl bg-[#182234] border border-[#222f49] p-6 flex flex-col">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wide">
+                      <span className="material-symbols-outlined text-[#0d59f2]">grid_view</span>
+                      Performance Attribution
+                    </h3>
+                    <span className="text-[10px] text-[#90a4cb] uppercase tracking-widest font-bold">Session Metrics</span>
                   </div>
-                ))}
-              </div>
-
-              {/* AI Narrative Box */}
-              <div className="flex-1 bg-[#101622] rounded-lg p-4 border border-[#314368] relative">
-                  <div className="flex justify-between items-center mb-2">
-                      <span className="text-[10px] font-black text-[#0d59f2] uppercase tracking-widest flex items-center gap-1">
-                          <span className="material-symbols-outlined text-sm">smart_toy</span> Factor Storyteller
-                      </span>
-                      <button 
-                        onClick={generateNarrative}
-                        disabled={isGenerating}
-                        className="text-[9px] font-bold text-white bg-[#0d59f2] px-2 py-1 rounded hover:bg-[#1a66ff] disabled:opacity-50"
-                      >
-                          {isGenerating ? 'Analyzing...' : 'Generate Insight'}
-                      </button>
+                  
+                  <div className="grid grid-cols-2 gap-4 mb-6">
+                      <div className="bg-[#0a0c10] p-4 rounded-xl border border-[#314368] flex flex-col justify-center text-center">
+                          <span className="text-[10px] text-[#90a4cb] uppercase font-bold mb-1">Total Trades</span>
+                          <span className="text-2xl font-black text-white">{analytics.totalTrades}</span>
+                      </div>
+                      <div className="bg-[#0a0c10] p-4 rounded-xl border border-[#314368] flex flex-col justify-center text-center">
+                          <span className="text-[10px] text-[#90a4cb] uppercase font-bold mb-1">Profit Factor</span>
+                          <span className="text-2xl font-black text-[#0bda5e]">{analytics.profitFactor}</span>
+                      </div>
+                      <div className="bg-[#0a0c10] p-4 rounded-xl border border-[#314368] flex flex-col justify-center text-center">
+                          <span className="text-[10px] text-[#90a4cb] uppercase font-bold mb-1">Win Rate (Time)</span>
+                          <span className={`text-2xl font-black ${Number(analytics.winRate) > 50 ? 'text-[#0bda5e]' : 'text-[#ffb347]'}`}>{analytics.winRate}%</span>
+                      </div>
+                      <div className="bg-[#0a0c10] p-4 rounded-xl border border-[#314368] flex flex-col justify-center text-center">
+                          <span className="text-[10px] text-[#90a4cb] uppercase font-bold mb-1">Net Return</span>
+                          <span className={`text-2xl font-black ${getTrendColor(Number(analytics.totalPnL))}`}>{Number(analytics.totalPnL) > 0 ? '+' : ''}{analytics.totalPnL}%</span>
+                      </div>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed font-medium">
-                      {narrative || "Click 'Generate Insight' to translate these factors into a readable attribution report."}
-                  </p>
-              </div>
-            </div>
 
-            {/* Return Distribution */}
-            <div className="col-span-12 lg:col-span-4 rounded-xl bg-[#182234] border border-[#222f49] p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wide">
-                  <span className="material-symbols-outlined text-[#0d59f2]">bar_chart_4_bars</span>
-                  Return Distribution
-                </h3>
-              </div>
-              <div className="h-40 flex items-end gap-1">
-                {[10, 25, 45, 85, 100, 75, 35, 15, 5].map((h, i) => (
-                  <div 
-                    key={i} 
-                    className={`flex-1 rounded-t transition-all duration-700 ${h > 70 ? 'bg-[#0d59f2]' : 'bg-[#222f49]'}`} 
-                    style={{ height: `${h}%`, opacity: 0.4 + (h / 100) * 0.6 }}
-                  ></div>
-                ))}
-              </div>
-              <div className="flex justify-between mt-2 text-[10px] text-[#90a4cb] font-black uppercase">
-                <span>-5%</span>
-                <span>0%</span>
-                <span>+5%</span>
-              </div>
-            </div>
+                  {/* FILLER: EQUITY CURVE MINI CHART */}
+                  <div className="flex-1 bg-[#0a0c10] rounded-xl border border-[#314368] p-2 relative overflow-hidden min-h-[100px] flex flex-col">
+                      <span className="text-[9px] text-[#90a4cb] font-bold uppercase tracking-wider absolute top-2 left-3 z-10">Equity Curve Velocity</span>
+                      <div className="flex-1">
+                          <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart data={analytics.equityCurve}>
+                                <defs>
+                                    <linearGradient id="eqMini" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#0d59f2" stopOpacity={0.3}/>
+                                        <stop offset="95%" stopColor="#0d59f2" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <Area type="monotone" dataKey="equity" stroke="#0d59f2" strokeWidth={2} fill="url(#eqMini)" />
+                                <YAxis domain={['dataMin', 'dataMax']} hide />
+                              </AreaChart>
+                          </ResponsiveContainer>
+                      </div>
+                  </div>
+                </div>
 
-            {/* Factor Scores Table */}
-            <div className="col-span-12 lg:col-span-8 rounded-xl bg-[#182234] border border-[#222f49] overflow-hidden">
-              <div className="p-4 border-b border-[#222f49] bg-[#1c283d]/50 flex justify-between items-center">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Commodity Factor Scores</h3>
-                <button className="text-[10px] px-3 py-1 bg-[#222f49] rounded hover:bg-[#0d59f2] transition-colors font-black uppercase tracking-tighter border border-[#314368]">Filter Assets</button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-[#101622] text-[#90a4cb] uppercase font-black tracking-widest">
-                    <tr>
-                      <th className="px-6 py-4">Commodity</th>
-                      <th className="px-6 py-4">Wthr Score</th>
-                      <th className="px-6 py-4">Macro Sent.</th>
-                      <th className="px-6 py-4">Flow Vol.</th>
-                      <th className="px-6 py-4">Composite</th>
-                      <th className="px-6 py-4">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#222f49]">
+                {/* 2. PnL Waterfall & Narrative */}
+                <div className="col-span-12 lg:col-span-6 rounded-xl bg-[#182234] border border-[#222f49] p-6 flex flex-col">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wide">
+                      <span className="material-symbols-outlined text-[#0d59f2]">analytics</span>
+                      PnL Components
+                    </h3>
+                  </div>
+                  
+                  <div className="h-48 w-full flex items-end gap-4 px-2 mb-6">
                     {[
-                      { name: 'Corn (ZC)', wthr: '+0.82', macro: '-0.14', flow: '0.45', comp: 'Strong Buy', trend: 1 },
-                      { name: 'Wheat (ZW)', wthr: '-0.45', macro: '+0.32', flow: '0.12', comp: 'Sell', trend: -1 },
-                      { name: 'Soybeans (ZS)', wthr: '0.10', macro: '+0.55', flow: '0.89', comp: 'Accumulate', trend: 1 }
-                    ].map((row, i) => {
-                        const trendClass = getTrendColor(row.trend, 'text');
+                      { label: 'Gross Gain', val: analytics.grossProfit, color: '#0bda5e' },
+                      { label: 'Gross Loss', val: -analytics.grossLoss, color: '#fa6238' },
+                      { label: 'Fees/Slip', val: (analytics.grossProfit - analytics.grossLoss) * 0.05, color: '#ffb347' }, // Est 5% Friction
+                      { label: 'Net PnL', val: (analytics.grossProfit - analytics.grossLoss) * 0.95, color: '#0d59f2' }
+                    ].map((bar, i, arr) => {
+                        const maxVal = Math.max(...arr.map(b => b.val));
+                        const heightPercent = maxVal > 0 ? (bar.val / maxVal) * 80 : 0;
+                        
                         return (
-                          <tr key={i} className="hover:bg-[#0d59f2]/5 transition-colors group">
-                            <td className="px-6 py-4 font-bold text-white uppercase">{row.name}</td>
-                            <td className={`px-6 py-4 font-bold ${row.wthr.startsWith('+') ? 'text-[var(--trend-up)]' : row.wthr.startsWith('-') ? 'text-[var(--trend-down)]' : 'text-white'}`}>{row.wthr}</td>
-                            <td className={`px-6 py-4 font-bold ${row.macro.startsWith('+') ? 'text-[var(--trend-up)]' : row.macro.startsWith('-') ? 'text-[var(--trend-down)]' : 'text-white'}`}>{row.macro}</td>
-                            <td className="px-6 py-4 text-white font-mono">{row.flow}</td>
-                            <td className="px-6 py-4">
-                              <span 
-                                  className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-tight ${trendClass}`}
-                                  style={{ backgroundColor: row.trend > 0 ? 'rgba(var(--trend-up-rgb), 0.1)' : 'rgba(var(--trend-down-rgb), 0.1)' }} 
-                              >
-                                  <span className="relative z-10">{row.comp}</span>
-                              </span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="material-symbols-outlined text-[#0d59f2] cursor-pointer group-hover:scale-110 transition-transform">open_in_new</span>
-                            </td>
-                          </tr>
+                          <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+                            <span className="text-[9px] font-mono text-white mb-1">{symbol}{Math.floor(bar.val).toLocaleString()}</span>
+                            <div 
+                              className="w-full rounded-t transition-all duration-500" 
+                              style={{ 
+                                  height: `${Math.max(5, heightPercent)}%`, 
+                                  backgroundColor: bar.color,
+                                  opacity: 0.9
+                              }}
+                            ></div>
+                            <span className="text-[9px] mt-2 uppercase font-bold text-[#90a4cb]">{bar.label}</span>
+                          </div>
                         );
                     })}
-                  </tbody>
-                </table>
+                  </div>
+
+                  {/* AI Narrative Box - FIXED HEIGHT WITH SCROLL */}
+                  <div className="flex-1 bg-[#101622] rounded-lg p-4 border border-[#314368] relative flex flex-col min-h-[140px]">
+                      <div className="flex justify-between items-center mb-2 shrink-0">
+                          <span className="text-[10px] font-black text-[#0d59f2] uppercase tracking-widest flex items-center gap-1">
+                              <span className="material-symbols-outlined text-sm">smart_toy</span> Gemini Attribution
+                          </span>
+                          <button 
+                            onClick={generateNarrative}
+                            disabled={isGenerating}
+                            className="text-[9px] font-bold text-white bg-[#0d59f2] px-2 py-1 rounded hover:bg-[#1a66ff] disabled:opacity-50"
+                          >
+                              {isGenerating ? 'Analyzing...' : 'Generate Insight'}
+                          </button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto custom-scrollbar h-24">
+                          <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                              {narrative || "Click 'Generate Insight' to translate your trade stats into a performance report."}
+                          </p>
+                      </div>
+                  </div>
+                </div>
+
+                {/* 3. Trade Log Table (Bottom) */}
+                <div className="col-span-12 rounded-xl bg-[#182234] border border-[#222f49] overflow-hidden">
+                  <div className="p-4 border-b border-[#222f49] bg-[#1c283d]/50 flex justify-between items-center">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Raw Trade Blotter</h3>
+                    <span className="text-[10px] text-[#90a4cb] uppercase font-bold">{engineStatus.tradeHistory.length} Executions</span>
+                  </div>
+                  <div className="overflow-x-auto max-h-64 custom-scrollbar">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#101622] text-[#90a4cb] uppercase font-black tracking-widest sticky top-0">
+                        <tr>
+                          <th className="px-6 py-4">Time</th>
+                          <th className="px-6 py-4">Symbol</th>
+                          <th className="px-6 py-4">Side</th>
+                          <th className="px-6 py-4 text-right">Price</th>
+                          <th className="px-6 py-4 text-right">Quantity</th>
+                          <th className="px-6 py-4 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#222f49]">
+                        {[...engineStatus.tradeHistory].reverse().map((trade: any, i) => {
+                            // Unified Time Format Logic
+                            const d = new Date(trade.timestamp);
+                            const dateStr = (engineStatus.config.mode === 'SIMULATION' || engineStatus.config.mode === 'TRAINING')
+                                ? `${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`
+                                : d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit', hour12: false});
+
+                            return (
+                                <tr key={i} className="hover:bg-[#0d59f2]/5 transition-colors group">
+                                    <td className="px-6 py-3 font-mono text-[#90a4cb]">
+                                        {dateStr}
+                                    </td>
+                                    <td className="px-6 py-3 font-bold text-white">{trade.symbol}</td>
+                                    <td className={`px-6 py-3 font-bold ${trade.side === 'LONG' ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
+                                        {trade.side}
+                                    </td>
+                                    <td className="px-6 py-3 text-right font-mono text-white">{trade.fillPrice ? trade.fillPrice.toFixed(2) : trade.price.toFixed(2)}</td>
+                                    <td className="px-6 py-3 text-right font-mono text-[#90a4cb]">{trade.quantity}</td>
+                                    <td className="px-6 py-3 text-center">
+                                        <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-[#0bda5e]/10 text-[#0bda5e] border border-[#0bda5e]/20">
+                                            FILLED
+                                        </span>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+          )}
         </main>
       </div>
     </div>

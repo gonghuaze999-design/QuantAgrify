@@ -1,13 +1,120 @@
 
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
 import { getTrendColor } from './GlobalState';
+import { GLOBAL_EXCHANGE } from './SimulationEngine';
+import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 
 interface RiskManagementProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
 }
 
+// Math Helper
+const calcStdDev = (arr: number[]) => {
+    if (arr.length < 2) return 0;
+    const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    return Math.sqrt(arr.reduce((sq, n) => sq + Math.pow(n - mean, 2), 0) / (arr.length - 1));
+};
+
 export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) => {
+  // --- LIVE ENGINE SYNC ---
+  const [engineStatus, setEngineStatus] = useState(GLOBAL_EXCHANGE.getStatus());
+  
+  // --- AI STATE ---
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  useEffect(() => {
+      const interval = setInterval(() => {
+          setEngineStatus(GLOBAL_EXCHANGE.getStatus());
+      }, 500); // 2Hz update
+      return () => clearInterval(interval);
+  }, []);
+
+  const symbol = engineStatus.config.baseCurrency === 'CNY' ? '¥' : '$';
+
+  // --- REAL-TIME RISK METRICS ---
+  const riskMetrics = useMemo(() => {
+      const history = engineStatus.account.history;
+      const equity = engineStatus.account.equity;
+      const margin = engineStatus.account.marginUsed;
+
+      // 1. Returns Analysis & Drawdown Curve
+      const returns = [];
+      const drawdownCurve = [];
+      let peak = -Infinity;
+      let maxDD = 0;
+
+      for (let i = 0; i < history.length; i++) {
+          if (history[i].equity > peak) peak = history[i].equity;
+          const dd = (history[i].equity - peak) / peak; // Negative value
+          if (dd < maxDD) maxDD = dd; // Keep track of min (max negative)
+          
+          drawdownCurve.push({ index: i, value: dd * 100 }); // Convert to %
+
+          if (i > 0) {
+              const r = (history[i].equity - history[i-1].equity) / history[i-1].equity;
+              returns.push(r);
+          }
+      }
+
+      // 2. Volatility (Annualized)
+      const stdDev = calcStdDev(returns);
+      const vol = stdDev * Math.sqrt(252); // Annualized
+
+      // 3. VaR (Parametric 99% 1-Day)
+      const dailyVaRPercent = stdDev * 2.33;
+      const dailyVaRValue = equity * dailyVaRPercent;
+
+      // 4. Exposure
+      const exposure = equity > 0 ? (margin / equity) * 100 : 0;
+
+      return {
+          vol: (vol * 100).toFixed(1),
+          dailyVaR: (dailyVaRPercent * 100).toFixed(2),
+          dailyVaRVal: symbol + Math.floor(dailyVaRValue).toLocaleString(),
+          maxDD: (maxDD * 100).toFixed(2),
+          exposure: exposure.toFixed(1),
+          drawdownCurve
+      };
+  }, [engineStatus.account.history, engineStatus.account.equity, engineStatus.account.marginUsed, symbol]);
+
+  const runScenarioAnalysis = async (scenario: string) => {
+      if (!process.env.API_KEY) return;
+      setIsSimulating(true);
+      setAiAnalysis(null);
+
+      const pos = engineStatus.positions;
+      const context = pos 
+        ? `Long ${pos.quantity} units of ${pos.symbol} @ ${pos.avgEntryPrice}`
+        : `All Cash (${engineStatus.account.equity.toFixed(0)})`;
+
+      const prompt = `
+        Act as a Chief Risk Officer (CRO).
+        Portfolio Context: ${context}.
+        Current Volatility: ${riskMetrics.vol}%.
+        Max Drawdown: ${riskMetrics.maxDD}%.
+        
+        Scenario to Test: "${scenario}"
+        
+        Provide a stress test assessment (max 30 words). Estimate potential PnL impact.
+      `;
+
+      try {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: prompt
+          });
+          setAiAnalysis(response.text);
+      } catch (e) {
+          setAiAnalysis("Risk Engine Offline.");
+      } finally {
+          setIsSimulating(false);
+      }
+  };
+
   const navItems = [
     { label: 'Data Source', icon: 'database', view: 'dataSource' as const },
     { label: 'Algorithm', icon: 'precision_manufacturing', view: 'algorithm' as const },
@@ -19,14 +126,14 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
     { label: 'Cockpit', icon: 'dashboard', view: 'cockpit' as const },
     { label: 'Analytics', icon: 'analytics', view: 'inDepthAnalytics' as const },
     { label: 'Backtest', icon: 'candlestick_chart', view: 'backtestEngine' as const },
-    { label: 'Risk Mgmt', icon: 'shield', view: 'riskManagement' as const, active: true },
+    { label: 'Risk Mgmt', icon: 'shield_with_heart', view: 'riskManagement' as const, active: true },
     { label: 'Assets', icon: 'layers', view: 'portfolioAssets' as const }
   ];
 
-  const varGauges = [
-    { label: 'Daily VaR', val: '2.4%', color: 'var(--trend-up)', offset: 180 },
-    { label: 'Weekly VaR', val: '8.1%', color: '#ffb347', offset: 100 },
-    { label: 'Monthly VaR', val: '14.2%', color: 'var(--trend-down)', offset: 40 }
+  const gauges = [
+    { label: 'Daily VaR (99%)', val: riskMetrics.dailyVaR, sub: riskMetrics.dailyVaRVal, color: '#fa6238', max: 5 },
+    { label: 'Realized Vol', val: riskMetrics.vol, sub: 'Annualized', color: '#ffb347', max: 50 },
+    { label: 'Leverage Use', val: riskMetrics.exposure, sub: 'Margin/Equity', color: '#0d59f2', max: 100 }
   ];
 
   return (
@@ -80,10 +187,6 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
               <span className="text-[10px] font-bold uppercase tracking-tighter">{item.label}</span>
             </div>
           ))}
-          <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
-            <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
-            <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
-          </div>
         </aside>
 
         {/* Main Content Area */}
@@ -93,129 +196,156 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
               <h1 className="text-3xl font-black tracking-tight text-white mb-1 uppercase tracking-tighter">Analysis: Risk Management</h1>
               <p className="text-[#90a4cb] text-sm flex items-center gap-2 font-medium">
                 <span className="material-symbols-outlined text-xs text-[#ffb347] fill-1">warning</span>
-                System Exposure Monitoring — 4 Active Warnings
+                Live OEMS Exposure Monitoring • {engineStatus.isRunning ? 'Engine Active' : 'Engine Idle'}
               </p>
             </div>
+            {engineStatus.alert && (
+                <div className="px-4 py-2 bg-[#fa6238]/10 border border-[#fa6238] rounded-lg animate-pulse flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[#fa6238]">error</span>
+                    <span className="text-xs font-bold text-[#fa6238] uppercase">Active Alert: {engineStatus.alert.title}</span>
+                </div>
+            )}
           </div>
 
           <div className="grid grid-cols-12 gap-6 auto-rows-max">
-            {/* Portfolio VaR Section */}
-            <div className="col-span-12 lg:col-span-6">
-              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-5 h-full">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-[#90a4cb] mb-8">Portfolio VaR (99% Confidence)</h3>
-                <div className="flex items-center justify-around gap-4 pb-4">
-                  {varGauges.map((gauge) => (
-                    <div key={gauge.label} className="flex flex-col items-center gap-3">
-                      <div className="relative flex items-center justify-center">
-                        <svg className="w-24 h-24 transform -rotate-90">
-                          <circle cx="48" cy="48" r="40" fill="transparent" stroke="#222f49" strokeWidth="8" />
-                          <circle 
-                            cx="48" cy="48" r="40" fill="transparent" 
-                            stroke={gauge.color} strokeWidth="8" 
-                            strokeDasharray="251.2" strokeDashoffset={gauge.offset}
-                            className="transition-all duration-1000 ease-out"
-                          />
-                        </svg>
-                        <span className="absolute text-lg font-black text-white">{gauge.val}</span>
-                      </div>
-                      <span className="text-[10px] font-bold text-[#90a4cb] uppercase tracking-widest">{gauge.label}</span>
-                    </div>
-                  ))}
+            {/* Portfolio VaR Section - SEMI CIRCLE GAUGES */}
+            <div className="col-span-12 lg:col-span-6 flex flex-col">
+              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-6 h-full flex flex-col justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-[#90a4cb] mb-4">Live Risk Metrics</h3>
+                
+                <div className="grid grid-cols-3 gap-2 flex-1 items-center">
+                  {gauges.map((gauge) => {
+                      const pct = Math.min(100, (parseFloat(gauge.val) / gauge.max) * 100);
+                      const rotation = -90 + (pct / 100) * 180;
+                      
+                      return (
+                        <div key={gauge.label} className="flex flex-col items-center">
+                          <div className="relative w-32 h-16 overflow-hidden">
+                              <div className="absolute top-0 left-0 w-32 h-32 rounded-full border-[8px] border-[#222f49] box-border" style={{ clipPath: 'inset(0 0 50% 0)' }}></div>
+                              <div 
+                                className="absolute top-0 left-0 w-32 h-32 rounded-full border-[8px] border-transparent box-border transition-all duration-1000 ease-out"
+                                style={{ 
+                                    borderColor: gauge.color,
+                                    clipPath: 'inset(0 0 50% 0)',
+                                    transform: `rotate(${rotation}deg)`,
+                                    borderBottomColor: 'transparent',
+                                    borderRightColor: 'transparent'
+                                }}
+                              ></div>
+                              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center pb-1">
+                                  <span className="text-lg font-black text-white block leading-none">{gauge.val}%</span>
+                              </div>
+                          </div>
+                          <span className="text-[9px] font-bold text-[#90a4cb] uppercase tracking-wider mt-2">{gauge.label}</span>
+                          <span className="text-[8px] text-[#555] font-mono uppercase">{gauge.sub}</span>
+                        </div>
+                      );
+                  })}
+                </div>
+                
+                <div className="mt-4 flex justify-between text-[9px] text-[#90a4cb] uppercase font-bold border-t border-[#222f49] pt-2">
+                    <span>Metrics update frequency: 2Hz</span>
+                    <span>Confidence Interval: 99%</span>
                 </div>
               </div>
             </div>
 
-            {/* Event Radar (NEW) */}
+            {/* Event Radar (Connected to Live Stress Test) */}
             <div className="col-span-12 lg:col-span-6">
               <div className="rounded-xl bg-[#182234] border border-[#222f49] p-5 h-full flex flex-col">
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="text-xs font-bold uppercase tracking-widest text-[#90a4cb] flex items-center gap-2">
                       <span className="material-symbols-outlined text-sm text-[#0d59f2]">radar</span>
-                      Predictive Event Radar (72h)
+                      Live Stress Testing
                   </h3>
+                  {isSimulating && <span className="text-[9px] bg-[#0d59f2] text-white px-2 py-0.5 rounded animate-pulse">Running...</span>}
                 </div>
-                <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
+                
+                <div className="space-y-4 flex-1">
                     {[
-                        { time: 'T-4h', event: 'USDA WASDE Report', impact: 'HIGH', type: 'Macro' },
-                        { time: 'T-18h', event: 'Fed Interest Rate Decision', impact: 'HIGH', type: 'Macro' },
-                        { time: 'T-26h', event: 'Brazil Port Strike Vote', impact: 'MED', type: 'Logistics' },
-                        { time: 'T-48h', event: 'MPOB Palm Oil Data', impact: 'LOW', type: 'Supply' },
-                    ].map((evt, i) => (
-                        <div key={i} className="flex items-center gap-4 p-2 rounded bg-[#101622] border border-[#222f49]">
-                            <span className="text-xs font-bold text-[#0d59f2] w-12">{evt.time}</span>
-                            <div className="flex-1">
-                                <span className="text-xs font-bold text-white block">{evt.event}</span>
-                                <span className="text-[9px] text-[#90a4cb] uppercase">{evt.type}</span>
+                        { name: 'Supply Chain Disruption', risk: 'Logistics' },
+                        { name: 'Flash Crash (-5% 10min)', risk: 'Liquidity' },
+                        { name: 'Interest Rate Spike', risk: 'Macro' },
+                    ].map((scenario, i) => (
+                        <div key={i} onClick={() => runScenarioAnalysis(scenario.name)} className="flex items-center justify-between gap-4 p-3 rounded bg-[#101622] border border-[#222f49] hover:border-[#0d59f2] cursor-pointer transition-colors group">
+                            <div className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-[#90a4cb] group-hover:text-white transition-colors">play_circle</span>
+                                <div>
+                                    <span className="text-xs font-bold text-white block">{scenario.name}</span>
+                                    <span className="text-[9px] text-[#90a4cb] uppercase">{scenario.risk}</span>
+                                </div>
                             </div>
-                            <span className={`text-[9px] font-black px-2 py-1 rounded border uppercase ${
-                                evt.impact === 'HIGH' ? 'text-[#fa6238] border-[#fa6238] bg-[#fa6238]/10' :
-                                evt.impact === 'MED' ? 'text-[#ffb347] border-[#ffb347] bg-[#ffb347]/10' :
-                                'text-[#0bda5e] border-[#0bda5e] bg-[#0bda5e]/10'
-                            }`}>{evt.impact} Impact</span>
+                            <span className="text-[9px] text-[#0d59f2] opacity-0 group-hover:opacity-100 font-bold uppercase transition-opacity">Run Sim</span>
                         </div>
                     ))}
                 </div>
-              </div>
-            </div>
-
-            {/* Correlation Network Map */}
-            <div className="col-span-12 lg:col-span-8">
-              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-6 relative overflow-hidden min-h-[400px]">
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-tight">
-                    <span className="material-symbols-outlined text-[#0d59f2]">hub</span>
-                    Inter-Commodity Correlation Network
-                  </h3>
-                  <span className="text-[10px] px-2 py-0.5 bg-[#222f49] rounded text-[#90a4cb] font-black uppercase tracking-widest">Live Linkages</span>
-                </div>
                 
-                <div className="h-[300px] w-full relative">
-                  {/* Static SVG Placeholder for complex D3 visual */}
-                  <svg className="w-full h-full opacity-60">
-                    <line stroke="var(--trend-down)" strokeDasharray="4" strokeWidth="3" x1="20%" y1="30%" x2="50%" y2="50%" />
-                    <line stroke="#0d59f2" strokeWidth="1" x1="80%" y1="30%" x2="50%" y2="50%" />
-                    <line stroke="#0d59f2" strokeWidth="2" x1="50%" y1="80%" x2="50%" y2="50%" />
-                    <line stroke="var(--trend-up)" strokeWidth="1" x1="20%" y1="30%" x2="80%" y2="30%" />
-                  </svg>
-                  
-                  <div className="absolute top-[30%] left-[20%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                    <div className="size-12 rounded-full bg-[var(--trend-down)]/20 border-2 border-[var(--trend-down)] flex items-center justify-center text-[10px] font-black shadow-[0_0_15px_rgba(250,98,56,0.2)]">CORN</div>
-                  </div>
-                  <div className="absolute top-[30%] left-[80%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                    <div className="size-10 rounded-full bg-[#0d59f2]/20 border-2 border-[#0d59f2] flex items-center justify-center text-[9px] font-black">WHEAT</div>
-                  </div>
-                  <div className="absolute top-[50%] left-[50%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                    <div className="size-14 rounded-full bg-[#ffb347]/20 border-2 border-[#ffb347] flex items-center justify-center text-[11px] font-black shadow-lg shadow-[#ffb347]/20">SOY</div>
-                  </div>
-                  <div className="absolute top-[80%] left-[50%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                    <div className="size-10 rounded-full bg-[#0d59f2]/20 border-2 border-[#0d59f2] flex items-center justify-center text-[9px] font-black">FERT</div>
-                  </div>
+                {/* AI Analysis Result - FIXED HEIGHT CONTAINER */}
+                <div className="mt-4 p-3 bg-[#0d59f2]/10 border border-[#0d59f2]/30 rounded-lg animate-in fade-in slide-in-from-bottom-2 h-[100px] flex flex-col">
+                    <p className="text-[10px] text-[#90a4cb] font-bold uppercase mb-1 flex items-center gap-1 shrink-0">
+                        <span className="material-symbols-outlined text-xs text-[#0d59f2]">smart_toy</span> Gemini Assessment
+                    </p>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        <p className="text-xs text-white leading-relaxed">
+                            {aiAnalysis || "Select a scenario to estimate portfolio impact."}
+                        </p>
+                    </div>
                 </div>
               </div>
             </div>
 
-            {/* Stress Test Scenarios */}
-            <div className="col-span-12 lg:col-span-4">
-              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-6 h-full flex flex-col">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-[#90a4cb] mb-6">Stress Test Scenarios</h3>
-                <div className="space-y-4 flex-1">
-                  {[
-                    { label: 'Price Crash (-10%)', val: '-$1.2M', desc: 'Estimated impact of sudden liquidity withdrawal.', color: getTrendColor(-1200000, 'text') },
-                    { label: 'Sudden Drought (Brazil)', val: '-$420K', desc: 'Impact on Soybean futures due to supply shock.', color: getTrendColor(-420000, 'text') },
-                    { label: 'Rate Hike (+50bps)', val: '+$112K', desc: 'USD strength impact on export hedging.', color: getTrendColor(112000, 'text') }
-                  ].map((scenario, i) => (
-                    <div key={i} className={`p-3 bg-[#0a0c10]/40 border-l-4 rounded-r-lg group hover:bg-[#0a0c10] transition-colors`} style={{ borderLeftColor: 'var(--trend-down)' }}>
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="text-xs font-bold text-white uppercase tracking-tight">{scenario.label}</span>
-                        <span className={`text-xs font-black ${scenario.color}`}>{scenario.val}</span>
+            {/* Max Drawdown Monitor - WITH SPARKLINE */}
+            <div className="col-span-12 lg:col-span-8">
+              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-6 relative overflow-hidden min-h-[200px] flex flex-col justify-between">
+                  <div className="flex justify-between items-start z-10 relative">
+                      <div>
+                          <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-tight mb-1">
+                            <span className="material-symbols-outlined text-[#fa6238]">waterfall_chart</span>
+                            Current Max Drawdown
+                          </h3>
+                          <p className="text-[#90a4cb] text-xs max-w-sm">
+                              Peak-to-trough decline.
+                          </p>
                       </div>
-                      <p className="text-[10px] text-[#90a4cb] leading-relaxed font-medium">{scenario.desc}</p>
-                    </div>
-                  ))}
-                </div>
-                <button className="w-full mt-6 py-3 text-xs font-black uppercase border border-[#222f49] rounded-lg hover:bg-[#222f49] transition-all text-white tracking-widest">
-                  Run Monte Carlo Simulation
+                      <div className="text-right bg-[#0a0c10]/80 p-2 rounded-lg border border-[#222f49] backdrop-blur-sm">
+                          <span className={`text-4xl font-black ${parseFloat(riskMetrics.maxDD) < -5 ? 'text-[#fa6238]' : 'text-[#0bda5e]'}`}>
+                              {riskMetrics.maxDD}%
+                          </span>
+                          <span className="block text-[9px] text-[#90a4cb] font-bold uppercase text-right">From HWM</span>
+                      </div>
+                  </div>
+                  
+                  {/* DRAWDOWN SPARKLINE */}
+                  <div className="absolute bottom-0 left-0 right-0 h-32 z-0 opacity-50 pointer-events-none">
+                      <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={riskMetrics.drawdownCurve}>
+                              <defs>
+                                  <linearGradient id="colorDD" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#fa6238" stopOpacity={0.3}/>
+                                      <stop offset="95%" stopColor="#fa6238" stopOpacity={0}/>
+                                  </linearGradient>
+                              </defs>
+                              <Area type="monotone" dataKey="value" stroke="#fa6238" strokeWidth={2} fill="url(#colorDD)" />
+                              <YAxis domain={['dataMin', 0]} hide />
+                          </AreaChart>
+                      </ResponsiveContainer>
+                  </div>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="col-span-12 lg:col-span-4">
+              <div className="rounded-xl bg-[#182234] border border-[#222f49] p-6 h-full flex flex-col justify-center gap-3">
+                <button 
+                    onClick={() => GLOBAL_EXCHANGE.stop()} 
+                    disabled={!engineStatus.isRunning}
+                    className="w-full py-3 text-xs font-black uppercase bg-[#fa6238] hover:bg-[#ff7b5a] text-black rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-900/20"
+                >
+                    <span className="material-symbols-outlined text-lg">pan_tool</span> Emergency Halt
                 </button>
+                <div className="text-center text-[9px] text-[#90a4cb] uppercase font-bold mt-1">
+                    Risk engine status: <span className="text-[#0bda5e]">Monitoring</span>
+                </div>
               </div>
             </div>
           </div>

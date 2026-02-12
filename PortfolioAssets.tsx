@@ -1,35 +1,78 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
 import { getTrendColor } from './GlobalState';
+import { GLOBAL_EXCHANGE, EngineMode } from './SimulationEngine';
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  ResponsiveContainer, 
+  Tooltip as RechartsTooltip,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid
+} from 'recharts';
 
 interface PortfolioAssetsProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
 }
 
 export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) => {
-  const [gateway, setGateway] = useState<'SIMULATION' | 'CTP_REAL' | 'IBKR'>('SIMULATION');
+  // --- ENGINE CONNECTION ---
+  const [engineStatus, setEngineStatus] = useState(GLOBAL_EXCHANGE.getStatus());
+  
+  // --- CONFIG FORM STATE ---
+  const [initialCapital, setInitialCapital] = useState(engineStatus.config.initialBalance || 1000000);
+  const [selectedGateway, setSelectedGateway] = useState<'SIM' | 'REAL'>(engineStatus.config.executionGateway || 'SIM');
+  
+  // Use Global State directly for Currency
+  const currency = engineStatus.config.baseCurrency || 'USD';
+  const currencySymbol = currency === 'USD' ? '$' : '¥';
+  
+  // --- AI / UX STATE ---
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationTip, setOptimizationTip] = useState<string | null>(null);
+
+  useEffect(() => {
+      const interval = setInterval(() => {
+          setEngineStatus(GLOBAL_EXCHANGE.getStatus());
+      }, 200); 
+      return () => clearInterval(interval);
+  }, []);
+
+  const handleApplyConfiguration = () => {
+      if (engineStatus.isRunning) return;
+      GLOBAL_EXCHANGE.configure({
+          initialBalance: Number(initialCapital),
+          executionGateway: selectedGateway,
+          mode: selectedGateway === 'REAL' ? 'REAL' : 'SIMULATION' 
+      });
+      setEngineStatus(GLOBAL_EXCHANGE.getStatus());
+      alert(`Capital Reset to ${currencySymbol}${Number(initialCapital).toLocaleString()} | Gateway: ${selectedGateway}`);
+  };
+
+  const updateCurrency = (newCurrency: 'USD' | 'CNY') => {
+      GLOBAL_EXCHANGE.configure({ baseCurrency: newCurrency });
+      // Force update local status immediately to reflect change in UI
+      setEngineStatus(GLOBAL_EXCHANGE.getStatus());
+  };
 
   const runOptimization = async () => {
       if (!process.env.API_KEY) return;
       setIsOptimizing(true);
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-          const prompt = `
-            Act as a Portfolio Manager.
-            Current Allocation: 45% Corn, 30% Soybeans, 25% Wheat.
-            Context: Corn and Soy have high correlation (0.85).
-            
-            Suggest ONE specific rebalancing action to reduce risk while maintaining exposure.
-            Max 2 sentences.
-          `;
-          const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
-              contents: prompt
-          });
+          const pos = engineStatus.positions;
+          const context = pos 
+            ? `Current Position: ${pos.side} ${pos.quantity} units of ${pos.symbol}.` 
+            : `Portfolio is currently 100% Cash (${currencySymbol}${engineStatus.account.equity.toFixed(2)}).`;
+
+          const prompt = `Act as a Portfolio Manager. ${context}. Provide a single, short strategic tip (max 20 words).`;
+          const response = await ai.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
           setOptimizationTip(response.text);
       } catch (e) {
           setOptimizationTip("Optimization Service Unavailable.");
@@ -37,6 +80,17 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
           setIsOptimizing(false);
       }
   };
+
+  const freeCash = Math.max(0, engineStatus.account.equity - engineStatus.account.marginUsed);
+  const allocationData = [
+      { name: 'Margin Used', value: engineStatus.account.marginUsed, color: '#ffb347' }, 
+      { name: 'Free Cash', value: freeCash, color: '#0d59f2' }
+  ];
+
+  const historyData = engineStatus.account.history.map(h => ({
+      time: new Date(h.time).toLocaleTimeString(),
+      equity: h.equity
+  }));
 
   const navItems = [
     { label: 'Data Source', icon: 'database', view: 'dataSource' as const },
@@ -90,7 +144,7 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
       </nav>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar - STANDARDIZED */}
+        {/* Left Sidebar */}
         <aside className="w-20 border-r border-[#222f49] bg-[#0a0c10] flex flex-col items-center py-6 gap-8 shrink-0">
           {sideNavItems.map(item => (
             <div 
@@ -104,119 +158,158 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
               <span className="text-[10px] font-bold uppercase tracking-tighter">{item.label}</span>
             </div>
           ))}
-          <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
-            <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
-            <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
-          </div>
         </aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-[#0a0c10] p-6">
           <div className="mb-8 flex justify-between items-end">
             <div>
-              <h1 className="text-3xl font-black tracking-tight text-white mb-1 uppercase tracking-tighter">Portfolio Analysis</h1>
+              <h1 className="text-3xl font-black tracking-tight text-white mb-1 uppercase tracking-tighter">Portfolio Assets</h1>
               <p className="text-[#90a4cb] text-sm flex items-center gap-2 font-medium">
                 <span className="material-symbols-outlined text-xs text-[#0bda5e] fill-1">account_balance_wallet</span>
-                Consolidated Asset Overview & Margin Tracking
+                Real-Time OEMS Account State & Capital Allocation
               </p>
             </div>
-            {/* Gateway Status Module (NEW) */}
+            
             <div className="flex gap-4 items-center bg-[#182234] border border-[#222f49] rounded-lg p-2 px-4">
+                <span className="text-[9px] text-[#90a4cb] uppercase font-bold">Engine Status:</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${engineStatus.isRunning ? 'bg-[#0bda5e]/10 text-[#0bda5e] border-[#0bda5e]/20' : 'bg-[#fa6238]/10 text-[#fa6238] border-[#fa6238]/20'}`}>
+                    {engineStatus.isRunning ? 'ACTIVE / LOCKED' : 'IDLE / CONFIG'}
+                </span>
+                <div className="w-px h-4 bg-[#314368] mx-2"></div>
                 <span className="text-[9px] text-[#90a4cb] uppercase font-bold">Execution Gateway:</span>
-                <div className="flex gap-2">
-                    <button onClick={() => setGateway('SIMULATION')} className={`size-3 rounded-full ${gateway === 'SIMULATION' ? 'bg-[#0d59f2] shadow-[0_0_5px_#0d59f2]' : 'bg-[#314368]'}`} title="Simulation"></button>
-                    <button onClick={() => setGateway('CTP_REAL')} className={`size-3 rounded-full ${gateway === 'CTP_REAL' ? 'bg-[#0bda5e] shadow-[0_0_5px_#0bda5e]' : 'bg-[#314368]'}`} title="CTP (Real)"></button>
-                    <button onClick={() => setGateway('IBKR')} className={`size-3 rounded-full ${gateway === 'IBKR' ? 'bg-[#ffb347] shadow-[0_0_5px_#ffb347]' : 'bg-[#314368]'}`} title="IBKR"></button>
-                </div>
-                <span className="text-[10px] font-mono text-white font-bold">{gateway === 'SIMULATION' ? 'SIM MODE (Local)' : gateway === 'CTP_REAL' ? 'CTP (Direct)' : 'IBKR (Gateway)'}</span>
+                <span className="text-[10px] font-mono text-white font-bold">
+                    {engineStatus.config.executionGateway === 'SIM' ? 'INTERNAL_SIM' : 'REAL_BROKER'}
+                </span>
             </div>
           </div>
 
           <div className="grid grid-cols-12 gap-6">
-            {/* Allocation Section with Optimization Doctor */}
+            
+            {/* 1. CONFIGURATION PANEL */}
+            <div className="col-span-12">
+                <div className={`rounded-xl border p-5 flex items-center justify-between transition-all ${engineStatus.isRunning ? 'bg-[#182234]/30 border-[#222f49] opacity-70 pointer-events-none' : 'bg-[#182234] border-[#0d59f2]/50 shadow-lg'}`}>
+                    <div className="flex items-center gap-6">
+                        <div className="flex flex-col">
+                            <label className="text-[9px] text-[#90a4cb] font-bold uppercase mb-1">Initial Capital ({currency})</label>
+                            <input 
+                                type="number" 
+                                value={initialCapital}
+                                onChange={(e) => setInitialCapital(Number(e.target.value))}
+                                className="bg-[#0a0c10] border border-[#314368] text-white font-mono font-bold text-lg px-3 py-1 rounded w-48 focus:border-[#0d59f2] outline-none"
+                                disabled={engineStatus.isRunning}
+                            />
+                        </div>
+                        <div className="flex flex-col">
+                            <label className="text-[9px] text-[#90a4cb] font-bold uppercase mb-1">Execution Mode</label>
+                            <div className="flex bg-[#0a0c10] rounded p-1 border border-[#314368]">
+                                <button onClick={() => setSelectedGateway('SIM')} className={`px-4 py-1 text-[10px] font-bold uppercase rounded transition-all ${selectedGateway === 'SIM' ? 'bg-[#0d59f2] text-white' : 'text-[#90a4cb]'}`} disabled={engineStatus.isRunning}>Simulation</button>
+                                <button onClick={() => setSelectedGateway('REAL')} className={`px-4 py-1 text-[10px] font-bold uppercase rounded transition-all ${selectedGateway === 'REAL' ? 'bg-[#0bda5e] text-[#0a0c10]' : 'text-[#90a4cb]'}`} disabled={engineStatus.isRunning}>Real Broker</button>
+                            </div>
+                        </div>
+                        <div className="flex flex-col">
+                            <label className="text-[9px] text-[#90a4cb] font-bold uppercase mb-1">Base Currency</label>
+                            <div className="flex bg-[#0a0c10] rounded p-1 border border-[#314368]">
+                                <button 
+                                    onClick={() => updateCurrency('USD')} 
+                                    className={`px-3 py-1 text-[10px] font-bold uppercase rounded transition-all ${currency === 'USD' ? 'bg-[#0d59f2] text-white' : 'text-[#90a4cb]'} disabled:opacity-30 disabled:cursor-not-allowed`}
+                                    disabled={engineStatus.isRunning || selectedGateway === 'REAL'}
+                                >
+                                    USD ($)
+                                </button>
+                                <button 
+                                    onClick={() => updateCurrency('CNY')} 
+                                    className={`px-3 py-1 text-[10px] font-bold uppercase rounded transition-all ${currency === 'CNY' ? 'bg-[#fa6238] text-white' : 'text-[#90a4cb]'} disabled:opacity-30 disabled:cursor-not-allowed`}
+                                    disabled={engineStatus.isRunning || selectedGateway === 'REAL'}
+                                >
+                                    CNY (¥)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button 
+                        onClick={handleApplyConfiguration}
+                        disabled={engineStatus.isRunning}
+                        className={`px-6 py-3 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center gap-2 transition-all ${engineStatus.isRunning ? 'bg-[#314368] text-[#90a4cb]' : 'bg-[#0d59f2] hover:bg-[#1a66ff] text-white shadow-lg'}`}
+                    >
+                        {engineStatus.isRunning ? 'Engine Locked (Running)' : 'Reset & Seed Account'}
+                        <span className="material-symbols-outlined text-sm">{engineStatus.isRunning ? 'lock' : 'account_balance_wallet'}</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* 2. Allocation */}
             <div className="col-span-12 lg:col-span-4">
               <div className="bg-[#182234] border border-[#222f49] rounded-xl p-6 h-full flex flex-col">
-                <h3 className="text-sm font-black uppercase tracking-[0.15em] text-[#90a4cb] mb-8 flex items-center gap-2">
+                <h3 className="text-sm font-black uppercase tracking-[0.15em] text-[#90a4cb] mb-4 flex items-center gap-2">
                   <span className="material-symbols-outlined text-[#0d59f2] text-lg">pie_chart</span>
-                  Asset Allocation
+                  Liquidity Profile
                 </h3>
-                <div className="flex-1 flex flex-col items-center justify-center py-4">
-                  <div className="relative w-48 h-48">
-                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 32 32">
-                      <circle className="text-[#0d59f2]" cx="16" cy="16" r="14" fill="transparent" stroke="currentColor" strokeDasharray="45 100" strokeWidth="4"></circle>
-                      <circle className="text-[#0bda5e]" cx="16" cy="16" r="14" fill="transparent" stroke="currentColor" strokeDasharray="30 100" strokeDashoffset="-45" strokeWidth="4"></circle>
-                      <circle className="text-[#fa6238]" cx="16" cy="16" r="14" fill="transparent" stroke="currentColor" strokeDasharray="25 100" strokeDashoffset="-75" strokeWidth="4"></circle>
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                      <span className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest leading-none">Equity</span>
-                      <span className="text-2xl font-black text-white mt-1">$1.2M</span>
+                <div className="flex-1 min-h-[200px] relative">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                            <Pie data={allocationData} dataKey="value" cx="50%" cy="50%" innerRadius={60} outerRadius={80} stroke="none">
+                                {allocationData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                            </Pie>
+                            <RechartsTooltip contentStyle={{backgroundColor: '#0a0c10', borderColor: '#314368', borderRadius: '8px', fontSize: '12px'}} />
+                        </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <span className="text-[10px] text-[#90a4cb] font-bold uppercase">Total Equity</span>
+                        <span className="text-2xl font-black text-white">{currencySymbol}{(engineStatus.account.equity / 1000).toFixed(1)}k</span>
                     </div>
-                  </div>
-                  
-                  {/* Optimization Doctor */}
-                  <div className="w-full mt-6 bg-[#101622] p-3 rounded-lg border border-[#314368] flex flex-col gap-2">
+                </div>
+                
+                {/* AI Optimization Tip */}
+                <div className="w-full mt-4 bg-[#101622] p-3 rounded-lg border border-[#314368] flex flex-col gap-2">
                       <div className="flex justify-between items-center">
                           <span className="text-[9px] font-bold text-[#90a4cb] uppercase flex items-center gap-1">
-                              <span className="material-symbols-outlined text-xs text-[#0d59f2]">medical_services</span> Optimization Doctor
+                              <span className="material-symbols-outlined text-xs text-[#0d59f2]">medical_services</span> Portfolio Doctor
                           </span>
-                          <button 
-                            onClick={runOptimization} 
-                            disabled={isOptimizing}
-                            className="text-[9px] text-white bg-[#0d59f2] px-2 py-1 rounded hover:bg-[#1a66ff]"
-                          >
-                              {isOptimizing ? 'Scanning...' : 'Scan Portfolio'}
-                          </button>
+                          <button onClick={runOptimization} disabled={isOptimizing} className="text-[9px] text-white bg-[#0d59f2] px-2 py-1 rounded hover:bg-[#1a66ff]">{isOptimizing ? 'Scanning...' : 'Scan'}</button>
                       </div>
-                      {optimizationTip && (
-                          <p className="text-[10px] text-slate-300 leading-tight border-l-2 border-[#0bda5e] pl-2">
-                              {optimizationTip}
-                          </p>
-                      )}
+                      {optimizationTip && <p className="text-[10px] text-slate-300 leading-tight border-l-2 border-[#0bda5e] pl-2 animate-in fade-in">{optimizationTip}</p>}
                   </div>
-                </div>
               </div>
             </div>
 
-            {/* NAV Trend Section */}
+            {/* 3. NAV History */}
             <div className="col-span-12 lg:col-span-8">
-              <div className="bg-[#182234] border border-[#222f49] rounded-xl p-6 flex flex-col h-full">
-                <div className="flex justify-between items-center mb-8">
+              <div className="bg-[#182234] border border-[#222f49] rounded-xl p-6 flex flex-col h-full min-h-[300px]">
+                <div className="flex justify-between items-center mb-4">
                   <h3 className="text-sm font-black uppercase tracking-[0.15em] text-[#90a4cb] flex items-center gap-2">
                     <span className="material-symbols-outlined text-[#0d59f2] text-lg">trending_up</span>
-                    Net Asset Value (NAV) Trend
+                    Net Asset Value (NAV)
                   </h3>
-                  <div className="flex bg-[#0a0c10] border border-[#222f49] rounded-lg p-1">
-                    {['1W', '1M', '3M', 'YTD'].map((t, i) => (
-                      <button key={t} className={`px-4 py-1 text-[10px] font-black uppercase rounded transition-all ${i === 1 ? 'bg-[#0d59f2] text-white shadow-lg' : 'text-[#90a4cb] hover:text-white'}`}>{t}</button>
-                    ))}
+                  <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-[#90a4cb]">High Water Mark:</span>
+                      <span className="text-xs font-mono font-bold text-[#0bda5e]">{currencySymbol}{engineStatus.account.highWaterMark.toFixed(2)}</span>
                   </div>
                 </div>
-                <div className="flex-1 min-h-[280px] w-full relative group">
-                  <svg className="w-full h-full" fill="none" preserveAspectRatio="none" viewBox="0 0 800 280">
-                    <line stroke="#222f49" strokeDasharray="4 4" strokeWidth="1" x1="0" x2="800" y1="50" y2="50" />
-                    <line stroke="#222f49" strokeDasharray="4 4" strokeWidth="1" x1="0" x2="800" y1="110" y2="110" />
-                    <line stroke="#222f49" strokeDasharray="4 4" strokeWidth="1" x1="0" x2="800" y1="170" y2="170" />
-                    <line stroke="#222f49" strokeDasharray="4 4" strokeWidth="1" x1="0" x2="800" y1="230" y2="230" />
-                    <path d="M0 200 Q 100 180, 200 190 T 350 120 T 500 140 T 650 60 T 800 40" fill="none" stroke="#0d59f2" strokeWidth="4" />
-                    <path d="M0 200 Q 100 180, 200 190 T 350 120 T 500 140 T 650 60 T 800 40 V 280 H 0 Z" fill="url(#navAssetsGradient)" />
-                    <defs>
-                      <linearGradient id="navAssetsGradient" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stopColor="#0d59f2" stopOpacity="0.2" />
-                        <stop offset="100%" stopColor="#0d59f2" stopOpacity="0" />
-                      </linearGradient>
-                    </defs>
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col justify-between text-[10px] font-black text-[#90a4cb] py-2 pointer-events-none uppercase tracking-tighter">
-                    <span>$1.30M</span>
-                    <span>$1.25M</span>
-                    <span>$1.20M</span>
-                    <span>$1.15M</span>
-                  </div>
+                <div className="flex-1 w-full relative">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={historyData}>
+                            <defs>
+                                <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="5%" stopColor="#0d59f2" stopOpacity={0.3}/>
+                                    <stop offset="95%" stopColor="#0d59f2" stopOpacity={0}/>
+                                </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#222f49" vertical={false} />
+                            <XAxis hide dataKey="time" />
+                            <YAxis domain={['auto', 'auto']} tick={{fill: '#90a4cb', fontSize: 10}} axisLine={false} tickLine={false} width={50} />
+                            <RechartsTooltip contentStyle={{ backgroundColor: '#0a0e17', borderColor: '#314368', borderRadius: '8px', fontSize: '12px' }} itemStyle={{ fontSize: '12px', fontFamily: 'monospace' }} />
+                            <Area type="monotone" dataKey="equity" stroke="#0d59f2" strokeWidth={2} fill="url(#colorEquity)" isAnimationActive={false} />
+                        </AreaChart>
+                    </ResponsiveContainer>
                 </div>
               </div>
             </div>
 
-            {/* Active Positions Table (kept similar to before but with improved styling) */}
+            {/* 4. Active Positions Table - EMPTY STATE */}
             <div className="col-span-12">
               <div className="bg-[#182234] border border-[#222f49] rounded-xl overflow-hidden shadow-2xl">
                 <div className="p-5 border-b border-[#222f49] flex justify-between items-center bg-[#101622]/50 backdrop-blur-sm">
@@ -224,61 +317,60 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                     <span className="material-symbols-outlined text-[#0d59f2] text-lg">list_alt</span>
                     Active Derivatives Positions
                   </h3>
-                  <button className="text-[10px] font-black text-[#0d59f2] hover:underline uppercase tracking-widest">Download Statement</button>
+                  <div className="flex gap-4 text-[10px] font-bold text-[#90a4cb] uppercase">
+                      <span>Total Margin: <span className="text-white">{currencySymbol}{engineStatus.account.marginUsed.toFixed(2)}</span></span>
+                      <span>Leverage: <span className="text-white">{engineStatus.account.leverage}x</span></span>
+                  </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-[#1a2539]/50 text-[#90a4cb] font-black uppercase tracking-widest text-[9px]">
-                      <tr>
-                        <th className="px-6 py-4">Asset / Instrument</th>
-                        <th className="px-6 py-4">Side</th>
-                        <th className="px-6 py-4 text-right">Size</th>
-                        <th className="px-6 py-4 text-right">Entry Price</th>
-                        <th className="px-6 py-4 text-right">Market Price</th>
-                        <th className="px-6 py-4 text-right">Unrealized PnL</th>
-                        <th className="px-6 py-4 text-center">Leverage</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#222f49] text-xs font-bold">
-                      {[
-                        { symbol: 'ZC', name: 'Corn Futures', contract: 'Dec 24 (ZCZ4)', side: 'Long', size: '50 Contracts', entry: '458.50', market: '462.25', pnl: '+$18,750.00', pnlPct: '+3.2%', lev: '5.0x' },
-                        { symbol: 'ZS', name: 'Soybean Futures', contract: 'Nov 24 (ZSX4)', side: 'Short', size: '20 Contracts', entry: '1,192.00', market: '1,184.50', pnl: '+$7,500.00', pnlPct: '+0.6%', lev: '3.0x' },
-                      ].map((pos, i) => {
-                          const pnlValue = parseFloat(pos.pnlPct.replace('%', ''));
-                          const trendColor = getTrendColor(pnlValue, 'text');
-                          
-                          return (
-                            <tr key={i} className="hover:bg-white/[0.03] transition-colors group">
-                              <td className="px-6 py-4">
-                                <div className="flex items-center gap-4">
-                                  <div className={`size-10 rounded border flex items-center justify-center font-black text-[11px] uppercase ${pos.side === 'Long' ? 'bg-[#0d59f2]/20 border-[#0d59f2]/40 text-[#0d59f2]' : 'bg-[#fa6238]/20 border-[#fa6238]/40 text-[#fa6238]'}`}>
-                                    {pos.symbol}
-                                  </div>
-                                  <div className="flex flex-col">
-                                    <p className="text-sm font-black text-white uppercase tracking-tight leading-none">{pos.name}</p>
-                                    <p className="text-[10px] text-[#90a4cb] font-black uppercase mt-1.5 opacity-60">{pos.contract}</p>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-6 py-4">
-                                <span className={`px-2 py-0.5 rounded ${pos.side === 'Long' ? 'bg-[#0d59f2]/10 text-[#0d59f2] border border-[#0d59f2]/20' : 'bg-[#fa6238]/10 text-[#fa6238] border border-[#fa6238]/20'} text-[10px] font-black uppercase tracking-tighter`}>{pos.side}</span>
-                              </td>
-                              <td className="px-6 py-4 text-right tabular-nums text-white">{pos.size}</td>
-                              <td className="px-6 py-4 text-right tabular-nums text-[#90a4cb]">{pos.entry}</td>
-                              <td className="px-6 py-4 text-right tabular-nums text-white">{pos.market}</td>
-                              <td className="px-6 py-4 text-right">
-                                <span className={`text-sm font-black tabular-nums ${trendColor}`}>{pos.pnl}</span>
-                                <span className={`block text-[10px] font-black ${trendColor} mt-0.5`}>{pos.pnlPct}</span>
-                              </td>
-                              <td className="px-6 py-4 text-center">
-                                <span className="text-[11px] font-black text-white px-2 py-0.5 border border-[#222f49] rounded tabular-nums bg-[#0a0c10]/40">{pos.lev}</span>
-                              </td>
-                            </tr>
-                          );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                
+                {engineStatus.positions ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead className="bg-[#1a2539]/50 text-[#90a4cb] font-black uppercase tracking-widest text-[9px]">
+                          <tr>
+                            <th className="px-6 py-4">Symbol</th>
+                            <th className="px-6 py-4">Side</th>
+                            <th className="px-6 py-4 text-right">Quantity</th>
+                            <th className="px-6 py-4 text-right">Avg Entry</th>
+                            <th className="px-6 py-4 text-right">Mark Price</th>
+                            <th className="px-6 py-4 text-right">Margin Used</th>
+                            <th className="px-6 py-4 text-right">Unrealized PnL</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#222f49] text-xs font-bold">
+                              <tr className="hover:bg-white/[0.03] transition-colors group">
+                                  <td className="px-6 py-4 font-mono text-white">{engineStatus.positions.symbol}</td>
+                                  <td className="px-6 py-4">
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${engineStatus.positions.side === 'LONG' ? 'bg-[#0d59f2]/10 text-[#0d59f2] border border-[#0d59f2]/20' : 'bg-[#fa6238]/10 text-[#fa6238] border border-[#fa6238]/20'}`}>
+                                          {engineStatus.positions.side}
+                                      </span>
+                                  </td>
+                                  <td className="px-6 py-4 text-right font-mono text-white">{engineStatus.positions.quantity}</td>
+                                  <td className="px-6 py-4 text-right font-mono text-[#90a4cb]">{engineStatus.positions.avgEntryPrice.toFixed(2)}</td>
+                                  <td className="px-6 py-4 text-right font-mono text-white">{engineStatus.positions.currentPrice.toFixed(2)}</td>
+                                  <td className="px-6 py-4 text-right font-mono text-[#ffb347]">{currencySymbol}{engineStatus.positions.marginUsed.toFixed(2)}</td>
+                                  <td className={`px-6 py-4 text-right font-mono ${engineStatus.positions.unrealizedPnL >= 0 ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
+                                      {engineStatus.positions.unrealizedPnL >= 0 ? '+' : ''}{engineStatus.positions.unrealizedPnL.toFixed(2)}
+                                  </td>
+                              </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                ) : (
+                    <div className="flex flex-col items-center justify-center p-12 bg-[#101622]/30">
+                        <div className="relative">
+                            <div className="absolute inset-0 bg-[#0d59f2]/20 rounded-full blur-xl animate-pulse"></div>
+                            <span className="material-symbols-outlined text-5xl text-[#90a4cb] relative z-10">radar</span>
+                        </div>
+                        <h4 className="text-white font-bold uppercase tracking-widest mt-4">Capital Idle - Ready to Deploy</h4>
+                        <p className="text-[10px] text-[#90a4cb] mt-2 max-w-xs text-center">
+                            No active derivatives positions detected. Configure a strategy in the <span className="text-[#0d59f2] cursor-pointer hover:underline" onClick={() => onNavigate('cockpit')}>Cockpit</span> to begin execution.
+                        </p>
+                        <button onClick={() => onNavigate('cockpit')} className="mt-4 px-6 py-2 bg-[#182234] border border-[#314368] hover:border-[#0d59f2] text-xs font-bold uppercase text-white rounded-lg transition-all flex items-center gap-2">
+                            Go to Cockpit <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                        </button>
+                    </div>
+                )}
               </div>
             </div>
           </div>

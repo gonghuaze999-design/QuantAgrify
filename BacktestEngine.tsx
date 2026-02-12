@@ -139,10 +139,6 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
               <span className="text-[10px] font-bold uppercase tracking-tighter">{item.label}</span>
             </div>
           ))}
-          <div className="mt-auto group flex flex-col items-center gap-1 cursor-pointer text-[#fa6238] transition-colors" onClick={() => onNavigate('login')}>
-            <div className="p-2.5 rounded-xl hover:bg-red-500/10"><span className="material-symbols-outlined">logout</span></div>
-            <span className="text-[10px] font-bold uppercase tracking-tighter">Logout</span>
-          </div>
         </aside>
 
         {/* Main Content Area */}

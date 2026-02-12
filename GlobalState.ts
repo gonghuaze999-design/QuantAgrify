@@ -73,6 +73,31 @@ export const COCKPIT_VIEW_CACHE = {
     initialized: false
 };
 
+// === NEW: DEPLOYED STRATEGY PACKAGE (OEMS Bridge) ===
+export interface DeployedStrategyPackage {
+    meta: {
+        strategyId: string;
+        assetSymbol: string;
+        deployTimestamp: number;
+    };
+    logic: {
+        factorWeights: Record<string, number>;
+        riskParams: {
+            stopLossAtrMultiplier: number;
+            targetVolatility: number;
+        };
+    };
+    history: {
+        equityCurve: { date: string; value: number }[];
+        // Full raw price series to rehydrate the Simulation Engine
+        fullSeries: { date: string; price: number; volume?: number }[]; 
+    };
+}
+
+export const DEPLOYED_STRATEGY = {
+    content: null as DeployedStrategyPackage | null
+};
+
 // 2. Shared Exchange Configuration
 export const EXCHANGE_MAPPING: Record<string, { name: string, varieties: { code: string, name: string }[] }> = {
     '.XDCE': {

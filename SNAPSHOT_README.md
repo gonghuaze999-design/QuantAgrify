@@ -1,36 +1,33 @@
 
-# QuantAgrify System Snapshot (v3.2.0 Full Suite)
+# QuantAgrify System Snapshot (v3.3.0-almost)
 
-**Timestamp:** System Freeze following Backend Bridge & QA Integration
-**Status:** **PRODUCTION READY - FULL STACK INTEGRATED**
+**Timestamp:** System Freeze - Post Currency Synchronization
+**Status:** **PRODUCTION READY - STABLE**
 
-## 1. Architecture Upgrade: "Full Stack Convergence"
-This version (v3.2.0) marks the completion of the backend middleware and validation layer. The application is no longer just a frontend prototype but a fully connected system capable of real data ingestion and rigorous logic testing.
+## 1. Latest Updates (v3.3.0-almost)
+This snapshot solidifies the "Global Currency Context" upgrade. The system now supports dynamic switching between **USD ($)** and **CNY (¥)** across the entire simulation lifecycle.
 
-### Core Modules
-*   **OEMS Cockpit:** Closed-loop execution from signal generation to order management.
-*   **Fusion Engine:** Multi-factor alignment of Weather, Satellite, and Macro data.
-*   **Risk Engine:** Ornstein-Uhlenbeck mean reversion modeling and VaR tracking.
+### Key Features Fixed
+*   **Global State Persistence:** Currency selection in `PortfolioAssets` now persists in the `GLOBAL_EXCHANGE` engine config.
+*   **Cross-Module Synchronization:**
+    *   **Portfolio Assets:** Configuration entry point.
+    *   **Analysis Cockpit:** Real-time equity and PnL display.
+    *   **Risk Management:** VaR and Drawdown calculations.
+    *   **In-Depth Analytics:** Performance attribution metrics.
+*   **Simulation Mode:** Users can toggle currency freely in Simulation/Training modes (Real mode remains locked to broker feed).
 
-## 2. Backend Middleware (`backend/main.py`)
-A robust FastAPI Python bridge has been integrated to handle:
-*   **GEE Proxy:** Server-side Google Earth Engine authentication (Service Account hot-swapping).
-*   **JQData Bridge:** Secure tunneling for Chinese Futures data access.
-*   **CORS Management:** Unified proxy handling for tradingeconomics and USDA APIs.
+## 2. Architecture Overview
+*   **Core Engine:** `SimulationEngine.ts` (VirtualExchange) now holds the `baseCurrency` state.
+*   **Frontend:** React components subscribe to engine status updates (200ms-1000ms polling) to reflect currency changes instantly without page reloads.
 
-## 3. Quality Assurance (`tests/`)
-A dedicated test suite has been established to verify algorithmic integrity:
-*   `audit_simulation.py`: Validates the generative logic for simulation data (seasonality, volatility clustering).
-*   `comprehensive_scenario_test.py`: Stress tests the platform against "Black Swan" events (e.g., Drought Shocks, Rollover Gaps).
+## 3. Backend Middleware (`backend/main.py`)
+*   **Status:** Stable (v2.9.5-LTS).
+*   **Services:** GEE Proxy, JQData Bridge, CORS Handling active.
 
-## 4. UI/UX Standardization
-*   **Chameleon System:** Consistent Green/Red logic toggles based on US/CN market context.
-*   **Precision Dashboard:** All 5 Cockpit sub-modules share unified navigation and visual hierarchy.
-
-## 5. Deployment Notes
-*   **Version:** v3.2.0-suite-stable
+## 4. Deployment Notes
+*   **Version:** v3.3.0-almost
 *   **Target:** Web (Responsive Desktop/Tablet).
-*   **Backend Requirement:** Python 3.9+, FastAPI, earthengine-api.
+*   **State:** All modules (DataSource, Algorithm, Cockpit, Risk, Assets) are integrated and consistent.
 
 ---
-*Snapshot v3.2.0 created by Lead Architect.*
+*Snapshot v3.3.0-almost created by Lead Architect.*

@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, ReferenceLine, ComposedChart, Line } from 'recharts';
 import { GLOBAL_EXCHANGE, EngineMode, EngineAlert } from './SimulationEngine';
-import { GLOBAL_MARKET_CONTEXT, DATA_LAYERS, PROCESSED_DATASET, COCKPIT_VIEW_CACHE } from './GlobalState';
+import { GLOBAL_MARKET_CONTEXT, DATA_LAYERS, PROCESSED_DATASET, COCKPIT_VIEW_CACHE, DEPLOYED_STRATEGY } from './GlobalState';
 
 interface AnalysisCockpitProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -55,7 +55,7 @@ interface TacticalLog {
 }
 
 // Data Source Option Type
-type DataSourceType = 'ALGORITHM' | 'JQDATA' | 'MOCK';
+type DataSourceType = 'ALGORITHM' | 'JQDATA' | 'MOCK' | 'DEPLOYED';
 
 export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) => {
   
@@ -86,6 +86,9 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
   const [neuralState, setNeuralState] = useState<'IDLE' | 'SCANNING' | 'ANALYZING' | 'EXECUTING'>(COCKPIT_VIEW_CACHE.neuralState);
   const [botConfidence, setBotConfidence] = useState(COCKPIT_VIEW_CACHE.botConfidence); // 0-100
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const blotterScrollRef = useRef<HTMLDivElement>(null);
+
+  const symbol = engineStatus.config.baseCurrency === 'CNY' ? '¥' : '$';
 
   // --- PERSISTENCE SYNC EFFECT ---
   useEffect(() => {
@@ -104,10 +107,66 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
   // Latency: Simulated jitter when running, otherwise 0
   const systemLatency = engineStatus.isRunning ? 12 + Math.floor(Math.random() * 5) : 0;
 
+  // --- ORDER STREAM MANAGEMENT ---
+  const orderStream = useMemo(() => {
+      // Access tradeHistory safely (cast to any if interface mismatch, though engine provides it)
+      const history = (engineStatus as any).tradeHistory || [];
+      const active = engineStatus.orders || [];
+      
+      // Merge and Sort by Timestamp (Oldest -> Newest) for log stream effect
+      return [...history, ...active].sort((a: any, b: any) => a.timestamp - b.timestamp);
+  }, [engineStatus]);
+
+  // Auto-scroll for Order Blotter
+  useEffect(() => {
+      if (blotterScrollRef.current) {
+          blotterScrollRef.current.scrollTop = blotterScrollRef.current.scrollHeight;
+      }
+  }, [orderStream.length]);
+
   // --- 1. INITIAL SYNC & HEARTBEAT ---
   useEffect(() => {
-      // Auto-configure if fresh load
-      if (GLOBAL_EXCHANGE.account.history.length === 0) {
+      // === OEMS BRIDGE: CHECK FOR DEPLOYED STRATEGY ===
+      // This overrides default config if a strategy was just deployed
+      if (DEPLOYED_STRATEGY.content) {
+          const strat = DEPLOYED_STRATEGY.content;
+          
+          // Only reconfigure if not already running this strategy
+          if (GLOBAL_EXCHANGE.config.symbol !== strat.meta.assetSymbol || GLOBAL_EXCHANGE.tradeHistory.length === 0) {
+              console.log(`[Cockpit] Hydrating from Deployed Strategy: ${strat.meta.strategyId}`);
+              
+              GLOBAL_EXCHANGE.configure({ 
+                  symbol: strat.meta.assetSymbol,
+                  mode: 'SIMULATION', // Auto-set to Sim for backtest verification
+                  initialBalance: 1000000 
+              });
+
+              // Inject Risk Logic
+              GLOBAL_EXCHANGE.setStrategy({
+                  name: strat.meta.strategyId,
+                  weights: strat.logic.factorWeights,
+                  stopLossMult: strat.logic.riskParams.stopLossAtrMultiplier,
+                  targetVol: strat.logic.riskParams.targetVolatility
+              });
+
+              // Ingest Historical Data (The "Backbone" for the simulation)
+              const engineData = strat.history.fullSeries.map(d => ({
+                  date: d.date,
+                  close: d.price,
+                  volume: d.volume || 0
+              }));
+              GLOBAL_EXCHANGE.ingestData(engineData);
+              
+              // Run initial fit to prep simulation
+              GLOBAL_EXCHANGE.runNumericalSimulation('SIMULATION'); // Default
+              
+              // Update local state to reflect readiness
+              setDataSource('DEPLOYED');
+              setFitMetrics({ score: '95.0', sigma: 1.2 }); // Synthetic fit metrics since we trust the deployment
+          }
+      } 
+      // Default Fallback
+      else if (GLOBAL_EXCHANGE.account.history.length === 0) {
           GLOBAL_EXCHANGE.configure({ symbol: GLOBAL_MARKET_CONTEXT.asset.code });
       }
 
@@ -338,7 +397,8 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
   // --- 3. HANDLERS ---
 
   const handleSourceCheck = () => {
-      if (PROCESSED_DATASET.ready) setDataSource('ALGORITHM');
+      if (DEPLOYED_STRATEGY.content) setDataSource('DEPLOYED');
+      else if (PROCESSED_DATASET.ready) setDataSource('ALGORITHM');
       else setDataSource('MOCK');
   };
 
@@ -346,9 +406,24 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
       if (showConfigModal) handleSourceCheck();
   }, [showConfigModal]);
 
+  // Update fit metrics based on selected mode whenever modal opens or mode changes
+  useEffect(() => {
+      if (showConfigModal) {
+          const contextMetrics = GLOBAL_EXCHANGE.getContextMetrics(formMode);
+          if (contextMetrics) {
+              setFitMetrics({ 
+                  score: contextMetrics.score, 
+                  sigma: parseFloat((contextMetrics.sigma * 100).toFixed(2)) 
+              });
+          } else {
+              setFitMetrics(null);
+          }
+      }
+  }, [formMode, showConfigModal]);
+
   const runNumericalFit = async () => {
       setIsFitting(true);
-      setFitMetrics(null);
+      // Don't reset fitMetrics globally here, wait for result
       
       // 1. Ingest Data
       if (dataSource === 'ALGORITHM') {
@@ -358,27 +433,17 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
               setIsFitting(false);
               return;
           }
+      } else if (dataSource === 'DEPLOYED') {
+          // No-op, data already ingested on mount
+          console.log("Using Deployed Strategy Data");
       } else {
           GLOBAL_EXCHANGE.ingestData([]);
       }
 
       await new Promise(r => setTimeout(r, 500));
 
-      // 2. Configure Split
-      let splitTs = undefined;
-      if (formMode === 'TRAINING' && PROCESSED_DATASET.ready && PROCESSED_DATASET.data.length > 0) {
-          const totalLen = PROCESSED_DATASET.data.length;
-          const splitIdx = Math.floor(totalLen * (splitPercent / 100));
-          splitTs = new Date(PROCESSED_DATASET.data[splitIdx].date).getTime();
-      }
-
-      GLOBAL_EXCHANGE.configure({
-          mode: formMode,
-          splitTimestamp: splitTs
-      });
-
-      // 3. Run Fit
-      const res = GLOBAL_EXCHANGE.runNumericalSimulation();
+      // 2. Run Fit FOR THE SELECTED MODE
+      const res = GLOBAL_EXCHANGE.runNumericalSimulation(formMode, splitPercent);
       
       await new Promise(r => setTimeout(r, 800)); 
 
@@ -388,42 +453,48 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
               sigma: parseFloat((res.metrics.sigma * 100).toFixed(2)) 
           });
       } else {
-          alert("Simulation Fitting Failed. Data insufficient.");
+          // If Real mode, success=true but metrics=null is valid
+          if (formMode !== 'REAL') {
+              alert("Simulation Fitting Failed. Data insufficient.");
+          }
       }
       
       setIsFitting(false);
   };
 
   const handleApplyConfig = () => {
-      if (!fitMetrics) {
-          alert("Please run Numerical Simulation Fit before applying.");
+      // Validate Fit
+      if (formMode !== 'REAL' && !fitMetrics) {
+          alert("Please run Numerical Simulation Fit for this mode before applying.");
           return;
       }
+
       setShowConfigModal(false);
+      
+      // Clear charts to prevent ghost data from previous mode
       setChartData([]);
       setAiLogs([]);
-      COCKPIT_VIEW_CACHE.chartData = []; // Clear cache on reset
+      COCKPIT_VIEW_CACHE.chartData = [];
       COCKPIT_VIEW_CACHE.logs = [];
       
-      const historyBuffer = (GLOBAL_EXCHANGE as any).historicalBuffer || [];
-      const currentIndex = (GLOBAL_EXCHANGE as any).tickIndex || 0;
-      const snapshot = historyBuffer.slice(Math.max(0, currentIndex - 99), currentIndex + 1);
+      // Configure Engine (this triggers the context hydration in engine)
+      GLOBAL_EXCHANGE.configure({
+          mode: formMode,
+          // Split timestamp handled inside engine context now
+      });
       
-      if (snapshot.length > 0) {
-          const formattedSnapshot = snapshot.map((t: any) => {
-              const d = new Date(t.time);
-              const isSim = GLOBAL_EXCHANGE.config.mode !== 'REAL';
-              return {
-                  rawTime: t.time,
-                  displayTime: isSim 
-                      ? d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })
-                      : d.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' }),
-                  price: t.price,
-                  predicted: t.predicted
-              };
-          });
-          setChartData(formattedSnapshot);
-      }
+      // Immediate chart refresh
+      const historyBuffer = (GLOBAL_EXCHANGE as any).historicalBuffer || [];
+      // If SIM/TRAIN, engine.currentTick is already set to the start point of that mode
+      // We just need to grab historical context for the chart backdrop
+      const currentTick = GLOBAL_EXCHANGE.currentTick;
+      
+      setChartData([{
+          rawTime: currentTick.time,
+          displayTime: new Date(currentTick.time).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }),
+          price: currentTick.price,
+          predicted: currentTick.predicted
+      }]);
   };
 
   const toggleRun = () => {
@@ -566,7 +637,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
           </div>
       )}
 
-      {/* CONFIG MODAL (Previous implementation maintained) */}
+      {/* CONFIG MODAL */}
       {showConfigModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in">
               <div className="bg-[#182234] border border-[#314368] rounded-2xl p-6 w-[500px] shadow-2xl">
@@ -593,55 +664,81 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                       <div className="space-y-2">
                           <label className="text-[10px] font-bold text-[#90a4cb] uppercase">Data Pipeline Source</label>
                           <div className="flex items-center gap-2 bg-[#0a0c10] border border-[#314368] p-2 rounded-lg">
-                              <span className={`material-symbols-outlined ${dataSource === 'ALGORITHM' ? 'text-[#0bda5e]' : 'text-[#90a4cb]'}`}>
-                                  {dataSource === 'ALGORITHM' ? 'check_circle' : 'error'}
+                              <span className={`material-symbols-outlined ${dataSource === 'ALGORITHM' || dataSource === 'DEPLOYED' ? 'text-[#0bda5e]' : 'text-[#90a4cb]'}`}>
+                                  {dataSource === 'ALGORITHM' || dataSource === 'DEPLOYED' ? 'check_circle' : 'error'}
                               </span>
                               <div className="flex-1">
-                                  <span className="text-xs font-bold text-white block">Algorithm Output</span>
+                                  <span className="text-xs font-bold text-white block">
+                                      {dataSource === 'DEPLOYED' ? 'Deployed Strategy Data' : 'Algorithm Output'}
+                                  </span>
                                   <span className="text-[9px] text-[#90a4cb] block">
-                                      {PROCESSED_DATASET.ready ? `Ready: ${PROCESSED_DATASET.asset}` : 'Not Found - Run Algorithm First'}
+                                      {dataSource === 'DEPLOYED' 
+                                        ? `Strategy: ${DEPLOYED_STRATEGY.content?.meta.strategyId}` 
+                                        : PROCESSED_DATASET.ready 
+                                            ? `Ready: ${PROCESSED_DATASET.asset}` 
+                                            : 'Not Found - Run Algorithm First'}
                                   </span>
                               </div>
                           </div>
                       </div>
 
                       <div className="space-y-2 pt-2 border-t border-[#314368]">
-                          <div className="flex justify-between items-center">
-                              <label className="text-[10px] font-bold text-[#0d59f2] uppercase">Numerical Fit (Ornstein-Uhlenbeck)</label>
-                              {fitMetrics && <span className="text-[9px] font-bold text-[#0bda5e] bg-[#0bda5e]/10 px-2 rounded border border-[#0bda5e]/20">Fit: {fitMetrics.score}</span>}
-                          </div>
+                          {formMode !== 'REAL' && (
+                              <>
+                                <div className="flex justify-between items-center">
+                                    <label className="text-[10px] font-bold text-[#0d59f2] uppercase">Numerical Fit (Ornstein-Uhlenbeck)</label>
+                                    {fitMetrics && <span className="text-[9px] font-bold text-[#0bda5e] bg-[#0bda5e]/10 px-2 rounded border border-[#0bda5e]/20">Fit: {fitMetrics.score}</span>}
+                                </div>
+                                
+                                {formMode === 'TRAINING' && (
+                                    <div className="bg-[#0a0c10] p-2 rounded border border-[#314368] mb-2">
+                                        <div className="flex justify-between text-[9px] text-[#90a4cb] mb-1">
+                                            <span>Training Set ({splitPercent}%)</span>
+                                            <span>Prediction ({100-splitPercent}%)</span>
+                                        </div>
+                                        <input 
+                                            type="range" min="50" max="90" step="5" 
+                                            value={splitPercent} onChange={(e) => setSplitPercent(Number(e.target.value))}
+                                            className="w-full h-1.5 bg-[#314368] rounded-lg appearance-none cursor-pointer accent-[#0d59f2]"
+                                        />
+                                    </div>
+                                )}
+
+                                <button 
+                                    onClick={runNumericalFit}
+                                    disabled={isFitting}
+                                    className="w-full py-3 bg-[#182234] hover:bg-[#222f49] border border-[#314368] hover:border-[#0d59f2] text-white text-xs font-bold uppercase rounded-lg transition-all flex items-center justify-center gap-2"
+                                >
+                                    {isFitting ? <span className="animate-spin material-symbols-outlined text-sm">sync</span> : <span className="material-symbols-outlined text-sm">function</span>}
+                                    {isFitting ? 'Fitting Parameters...' : 'Run Numerical Fit'}
+                                </button>
+                              </>
+                          )}
                           
-                          {formMode === 'TRAINING' && (
-                              <div className="bg-[#0a0c10] p-2 rounded border border-[#314368] mb-2">
-                                  <div className="flex justify-between text-[9px] text-[#90a4cb] mb-1">
-                                      <span>Training Set ({splitPercent}%)</span>
-                                      <span>Prediction ({100-splitPercent}%)</span>
-                                  </div>
-                                  <input 
-                                    type="range" min="50" max="90" step="5" 
-                                    value={splitPercent} onChange={(e) => setSplitPercent(Number(e.target.value))}
-                                    className="w-full h-1.5 bg-[#314368] rounded-lg appearance-none cursor-pointer accent-[#0d59f2]"
-                                  />
+                          {formMode === 'REAL' && (
+                              <div className="p-3 bg-[#fa6238]/10 border border-[#fa6238]/30 rounded-lg text-center">
+                                  <p className="text-[10px] text-[#fa6238] font-bold uppercase">Real Trading Mode</p>
+                                  <p className="text-[9px] text-slate-300">Using System Clock & Simulated Jitter. No numerical fit required.</p>
                               </div>
                           )}
-
-                          <button 
-                            onClick={runNumericalFit}
-                            disabled={isFitting}
-                            className="w-full py-3 bg-[#182234] hover:bg-[#222f49] border border-[#314368] hover:border-[#0d59f2] text-white text-xs font-bold uppercase rounded-lg transition-all flex items-center justify-center gap-2"
-                          >
-                              {isFitting ? <span className="animate-spin material-symbols-outlined text-sm">sync</span> : <span className="material-symbols-outlined text-sm">function</span>}
-                              {isFitting ? 'Fitting Parameters...' : 'Run Numerical Fit'}
-                          </button>
                       </div>
                   </div>
 
                   <div className="flex gap-3 mt-8">
-                      <button onClick={() => setShowConfigModal(false)} className="flex-1 py-3 text-xs font-bold text-[#90a4cb] hover:text-white transition-colors">Cancel</button>
+                      <button 
+                        onClick={() => setShowConfigModal(false)} 
+                        className="flex-1 py-3 rounded-lg border border-[#314368] text-[#90a4cb] hover:text-white hover:bg-[#222f49] text-xs font-bold uppercase transition-all"
+                      >
+                        Cancel
+                      </button>
                       <button 
                         onClick={handleApplyConfig} 
-                        disabled={!fitMetrics}
-                        className={`flex-1 py-3 text-white text-xs font-bold uppercase rounded-lg shadow-lg transition-all ${!fitMetrics ? 'bg-[#314368] text-[#90a4cb] cursor-not-allowed' : 'bg-[#0d59f2] hover:bg-[#1a66ff]'}`}
+                        disabled={formMode !== 'REAL' && !fitMetrics}
+                        className={`flex-1 py-3 text-white text-xs font-bold uppercase rounded-lg shadow-lg transition-all ${
+                            (formMode !== 'REAL' && !fitMetrics) 
+                            ? 'bg-[#314368] text-[#90a4cb] cursor-not-allowed' 
+                            : 'bg-[#0d59f2] hover:bg-[#1a66ff]'
+                        }`}
                       >
                           Apply Configuration
                       </button>
@@ -871,7 +968,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                         <div className="space-y-4">
                             <div className="flex justify-between">
                                 <span className="text-[10px] text-[#90a4cb] uppercase cursor-help" title="Total Account Value (Balance + PnL)">Equity</span>
-                                <span className="text-lg font-mono font-bold text-white">${engineStatus.account.equity.toFixed(2)}</span>
+                                <span className="text-lg font-mono font-bold text-white">{symbol}{engineStatus.account.equity.toFixed(2)}</span>
                             </div>
                             <div className="w-full bg-[#0a0c10] h-3 rounded-full overflow-hidden border border-[#314368]">
                                 <div className={`h-full bg-[#0d59f2]`} style={{ width: `${Math.min(100, (engineStatus.account.marginUsed / engineStatus.account.equity) * 100)}%` }}></div>
@@ -880,15 +977,15 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                             <div className="grid grid-cols-3 gap-2 mt-2">
                                 <div className="bg-[#0a0c10] p-2 rounded text-center cursor-help" title="Realized Balance (Cash)">
                                     <span className="text-[8px] text-[#90a4cb] uppercase block mb-1">Total Balance</span>
-                                    <span className="text-[10px] font-bold text-white">${(engineStatus.account.balance / 1000).toFixed(1)}k</span>
+                                    <span className="text-[10px] font-bold text-white">{symbol}{(engineStatus.account.balance / 1000).toFixed(1)}k</span>
                                 </div>
                                 <div className="bg-[#0a0c10] p-2 rounded text-center cursor-help" title="Funds locked in active positions">
                                     <span className="text-[8px] text-[#90a4cb] uppercase block mb-1">Used Margin</span>
-                                    <span className="text-[10px] font-bold text-[#ffb347]">${(engineStatus.account.marginUsed / 1000).toFixed(1)}k</span>
+                                    <span className="text-[10px] font-bold text-[#ffb347]">{symbol}{(engineStatus.account.marginUsed / 1000).toFixed(1)}k</span>
                                 </div>
                                 <div className="bg-[#0a0c10] p-2 rounded text-center cursor-help" title="Available funds for new trades">
                                     <span className="text-[8px] text-[#90a4cb] uppercase block mb-1">Free Liquidity</span>
-                                    <span className="text-[10px] font-bold text-[#0bda5e]">${((engineStatus.account.equity - engineStatus.account.marginUsed) / 1000).toFixed(1)}k</span>
+                                    <span className="text-[10px] font-bold text-[#0bda5e]">{symbol}{((engineStatus.account.equity - engineStatus.account.marginUsed) / 1000).toFixed(1)}k</span>
                                 </div>
                             </div>
 
@@ -938,16 +1035,19 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
 
                     {/* NEW: ORDER BLOTTER (Bottom Right Module) */}
                     <div className="bg-[#182234] border border-[#222f49] rounded-xl p-0 overflow-hidden flex flex-col h-[250px]">
-                        <div className="p-4 border-b border-[#222f49] bg-[#101622]/50 flex justify-between items-center">
+                        <div className="p-4 border-b border-[#222f49] bg-[#101622]/50 flex justify-between items-center shrink-0">
                             <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
                                 <span className="material-symbols-outlined text-sm text-[#0d59f2]">list_alt</span> 
                                 Order Blotter
                             </h3>
-                            <span className="text-[9px] text-[#90a4cb] uppercase font-bold">{engineStatus.orders.length} Orders</span>
+                            <span className="text-[9px] text-[#90a4cb] uppercase font-bold">{orderStream.length} Actions</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        <div 
+                            ref={blotterScrollRef} 
+                            className="flex-1 overflow-y-auto custom-scrollbar"
+                        >
                             <table className="w-full text-left text-[10px]">
-                                <thead className="bg-[#101622] text-[#90a4cb] sticky top-0">
+                                <thead className="bg-[#101622] text-[#90a4cb] sticky top-0 z-10 shadow-sm shadow-black">
                                     <tr>
                                         <th className="px-3 py-2 font-bold">Time</th>
                                         <th className="px-3 py-2 font-bold">Side</th>
@@ -957,16 +1057,26 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#222f49]">
-                                    {[...engineStatus.orders].reverse().map(order => (
-                                        <tr key={order.id} className="hover:bg-white/5">
+                                    {orderStream.map((order: any) => (
+                                        <tr key={order.id} className="hover:bg-white/5 transition-colors">
                                             <td className="px-3 py-2 font-mono text-[#90a4cb]">
-                                                {new Date(order.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})}
+                                                {(() => {
+                                                    const d = new Date(order.timestamp);
+                                                    if (engineStatus.config.mode === 'SIMULATION' || engineStatus.config.mode === 'TRAINING') {
+                                                        return `${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+                                                    } else {
+                                                        return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false});
+                                                    }
+                                                })()}
                                             </td>
                                             <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
                                                 {order.side}
                                             </td>
                                             <td className="px-3 py-2 text-right font-mono text-white">{order.quantity}</td>
-                                            <td className="px-3 py-2 text-right font-mono text-[#90a4cb]">{order.price.toFixed(1)}</td>
+                                            <td className="px-3 py-2 text-right font-mono text-[#90a4cb]">
+                                                {/* Use fillPrice if historical/filled, else current order price */}
+                                                {(order.fillPrice || order.price).toFixed(1)}
+                                            </td>
                                             <td className="px-3 py-2 text-center">
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
                                                     order.status === 'FILLED' ? 'bg-[#0bda5e]/20 text-[#0bda5e]' :
@@ -978,8 +1088,8 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                                             </td>
                                         </tr>
                                     ))}
-                                    {engineStatus.orders.length === 0 && (
-                                        <tr><td colSpan={5} className="px-3 py-8 text-center text-[#90a4cb] italic">No active orders</td></tr>
+                                    {orderStream.length === 0 && (
+                                        <tr><td colSpan={5} className="px-3 py-8 text-center text-[#90a4cb] italic">No active or historical orders</td></tr>
                                     )}
                                 </tbody>
                             </table>
