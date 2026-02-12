@@ -1,11 +1,11 @@
 
 {
-  "description": "QuantAgrify Professional v3.3.0 (Full Suite). Backend Bridge (Python FastAPI), Unit Tests, and Global State Persistence fully integrated. All 20+ modules active including OEMS Closed Loop.",
+  "description": "QuantAgrify Professional v3.3.5 (Full Suite). Includes Smart Log Streaming, Backend Bridge (Python FastAPI), and OEMS Closed Loop. Currency Context and Risk Engine fully synchronized.",
   "requestFramePermissions": [
     "camera",
     "microphone",
     "geolocation"
   ],
-  "name": "QuantAgrify v3.3.0 Pro",
-  "version": "3.3.0-almost"
+  "name": "QuantAgrify v3.3.5 Pro",
+  "version": "3.3.5-almost"
 }

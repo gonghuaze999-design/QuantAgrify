@@ -90,6 +90,9 @@ export const ApiLogs: React.FC<ApiLogsProps> = ({ onNavigate }) => {
   // Refs
   const logListRef = useRef<HTMLDivElement>(null);
   const logItemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  
+  // Tracking Auto-Scroll State (Defaults to true to fix initial load position)
+  const shouldAutoScroll = useRef(true);
 
   // 1. Subscribe to Global Log Stream
   useEffect(() => {
@@ -104,15 +107,25 @@ export const ApiLogs: React.FC<ApiLogsProps> = ({ onNavigate }) => {
       return () => unsubscribe();
   }, []);
 
-  // 2. Auto-scroll to bottom if near bottom (unless searching)
+  // 2. Auto-scroll Logic (Smart Tracking)
   useEffect(() => {
-      if (currentSearchIndex === -1 && logListRef.current) {
-          const { scrollTop, scrollHeight, clientHeight } = logListRef.current;
-          if (scrollHeight - scrollTop - clientHeight < 200) {
-              logListRef.current.scrollTop = scrollHeight;
-          }
+      // If we are searching through history, do not auto-scroll
+      if (currentSearchIndex !== -1) return;
+
+      if (logListRef.current && shouldAutoScroll.current) {
+          logListRef.current.scrollTop = logListRef.current.scrollHeight;
       }
-  }, [logs]);
+  }, [logs, currentSearchIndex]);
+
+  // Handle manual scroll to toggle auto-scroll latch
+  const handleListScroll = () => {
+      if (!logListRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = logListRef.current;
+      
+      // If user is within 150px of the bottom, enable auto-scroll. Otherwise, assume they are reading history.
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+      shouldAutoScroll.current = isNearBottom;
+  };
 
   // 3. Search Logic
   useEffect(() => {
@@ -170,6 +183,7 @@ export const ApiLogs: React.FC<ApiLogsProps> = ({ onNavigate }) => {
       setLogs([]);
       setSelectedLogIds(new Set());
       setAiResponse(null);
+      shouldAutoScroll.current = true; // Reset auto-scroll on clear
   };
 
   const simulateTraffic = () => {
@@ -399,7 +413,11 @@ export const ApiLogs: React.FC<ApiLogsProps> = ({ onNavigate }) => {
             </div>
 
             {/* Log List */}
-            <div ref={logListRef} className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+            <div 
+                ref={logListRef} 
+                className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1"
+                onScroll={handleListScroll}
+            >
                 {logs.length === 0 && (
                     <div className="h-full flex flex-col items-center justify-center text-[#90a4cb] opacity-50">
                         <span className="material-symbols-outlined text-4xl mb-2">terminal</span>

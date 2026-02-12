@@ -399,18 +399,30 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
       return { mean, std, zScore };
   }, [chartData]);
 
-  // Map Z-Score (-3 to +3) to SVG Coordinates (approx 20 to 180, center 100)
+  // --- Gaussian Curve Math ---
+  const gaussianPath = useMemo(() => {
+      // Generate strict gaussian bell curve path
+      // Formula: y = A * exp(-0.5 * z^2) where z = (x - meanX) / sigmaX
+      // ViewBox: 0 0 200 100. Center X=100.
+      // Scale: Let sigmaX = 26px (matches the dot position logic)
+      let d = "M 0 90"; 
+      for (let x = 0; x <= 200; x += 2) {
+          const z = (x - 100) / 26;
+          // Peak height 80 (from y=90 to y=10)
+          const y = 90 - (80 * Math.exp(-0.5 * z * z));
+          d += ` L ${x} ${y}`;
+      }
+      return d;
+  }, []);
+
   const bellCurveDotX = useMemo(() => {
       const clampedZ = Math.max(-3, Math.min(3, basisStats.zScore));
-      return 100 + (clampedZ * 26); // 26px per sigma unit
+      return 100 + (clampedZ * 26); // Matches curve generation scale
   }, [basisStats.zScore]);
 
-  // Calculate Y coordinate on the bell curve based on Z-Score
   const bellCurveDotY = useMemo(() => {
       const z = Math.max(-3, Math.min(3, basisStats.zScore));
-      // Bell curve approximation for Y axis:
-      // Base line is around 90, Peak is around 10. Amplitude is 80.
-      // Gaussian: e^(-0.5 * z^2)
+      // STRICTLY use same formula as path generation
       const height = 80 * Math.exp(-0.5 * z * z);
       return 90 - height;
   }, [basisStats.zScore]);
@@ -702,29 +714,26 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
                     <p className="text-[#90a4cb] text-xs">Spread between Spot ({spotSource}) and Futures ({ASSET_CONFIG[activeAsset].jqCode})</p>
                   </div>
                   <div className="flex items-center gap-4 text-xs">
+                    {/* Badge moved here from absolute position */}
+                    {latestData?.isSpotSimulated && (
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-[#ffb347]/30 bg-[#ffb347]/10">
+                             <span className="material-symbols-outlined text-[#ffb347] text-[10px] animate-pulse">science</span>
+                             <span className="text-[9px] font-bold text-[#ffb347] uppercase tracking-wider">Sim Mode</span>
+                        </div>
+                    )}
+                    {!latestData?.isSpotSimulated && latestData && (
+                         <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-[#0bda5e]/30 bg-[#0bda5e]/10">
+                             <span className="size-1.5 rounded-full bg-[#0bda5e] animate-pulse"></span>
+                             <span className="text-[9px] font-bold text-[#0bda5e] uppercase tracking-wider">Live</span>
+                        </div>
+                    )}
+
                     <div className="flex items-center gap-1"><span className="w-3 h-1 bg-[#0d59f2]"></span> Futures</div>
                     <div className="flex items-center gap-1"><span className="w-3 h-1 bg-[#fa6238]"></span> Spot</div>
                     <div className="flex items-center gap-1"><span className="w-3 h-3 bg-[#0bda5e] opacity-30"></span> Basis</div>
                   </div>
                 </div>
                 
-                {/* Visual Status Indicator for Simulation Mode */}
-                {latestData?.isSpotSimulated && (
-                    <div className="absolute top-14 right-6 z-10 bg-[#ffb347]/10 border border-[#ffb347]/30 px-2 py-1 rounded-lg flex items-center gap-1.5 shadow-xl backdrop-blur-md">
-                        <span className="material-symbols-outlined text-[#ffb347] text-xs animate-pulse">science</span>
-                        <div className="flex flex-col leading-none">
-                            <span className="text-[9px] font-black text-[#ffb347] uppercase tracking-widest">Simulation Mode</span>
-                            <span className="text-[8px] text-[#ffb347]/70 font-bold uppercase">Estimated Data (Fallback)</span>
-                        </div>
-                    </div>
-                )}
-                {!latestData?.isSpotSimulated && latestData && (
-                    <div className="absolute top-14 right-6 z-10 bg-[#0bda5e]/10 border border-[#0bda5e]/30 px-2 py-1 rounded-lg flex items-center gap-1.5 shadow-xl backdrop-blur-md">
-                        <span className="size-2 rounded-full bg-[#0bda5e] animate-pulse shadow-[0_0_8px_#0bda5e]"></span>
-                        <span className="text-[9px] font-black text-[#0bda5e] uppercase tracking-widest">Live Data Feed</span>
-                    </div>
-                )}
-
                 <div className="flex-1 w-full min-h-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -757,12 +766,12 @@ export const SpotIndustry: React.FC<SpotIndustryProps> = ({ onNavigate }) => {
               <div className="col-span-12 lg:col-span-4 bg-[#182234]/20 border border-[#314368] rounded-xl p-6 flex flex-col h-[400px]">
                 <h3 className="text-white text-sm font-bold uppercase tracking-wide mb-4">Basis Probability Distribution</h3>
                 <div className="flex-1 flex flex-col items-center justify-center relative">
-                    {/* Dynamic Bell Curve */}
+                    {/* Dynamic Gaussian Curve */}
                     <svg className="w-full h-full" viewBox="0 0 200 100" preserveAspectRatio="none">
-                        <path d="M0,90 Q50,90 80,20 Q100,0 120,20 Q150,90 200,90" fill="none" stroke="var(--trend-up)" strokeWidth="2" />
+                        <path d={gaussianPath} fill="none" stroke="var(--trend-up)" strokeWidth="2" />
                         <line x1="100" y1="0" x2="100" y2="100" stroke="#314368" strokeDasharray="2 2" />
                         
-                        {/* Dynamic Current Point based on Z-Score */}
+                        {/* Dynamic Current Point based on Z-Score - Perfectly aligned to path */}
                         <circle 
                             cx={bellCurveDotX} 
                             cy={bellCurveDotY} 

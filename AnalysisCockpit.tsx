@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, ReferenceLine, ComposedChart, Line } from 'recharts';
 import { GLOBAL_EXCHANGE, EngineMode, EngineAlert } from './SimulationEngine';
-import { GLOBAL_MARKET_CONTEXT, DATA_LAYERS, PROCESSED_DATASET, COCKPIT_VIEW_CACHE, DEPLOYED_STRATEGY } from './GlobalState';
+import { GLOBAL_MARKET_CONTEXT, DATA_LAYERS, PROCESSED_DATASET, COCKPIT_VIEW_CACHE, DEPLOYED_STRATEGY, SystemLogStream, getTrendColor } from './GlobalState';
 
 interface AnalysisCockpitProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -134,6 +134,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
           // Only reconfigure if not already running this strategy
           if (GLOBAL_EXCHANGE.config.symbol !== strat.meta.assetSymbol || GLOBAL_EXCHANGE.tradeHistory.length === 0) {
               console.log(`[Cockpit] Hydrating from Deployed Strategy: ${strat.meta.strategyId}`);
+              SystemLogStream.push({ type: 'INFO', module: 'Cockpit', action: 'Deploy', message: `Hydrating strategy: ${strat.meta.strategyId}` });
               
               GLOBAL_EXCHANGE.configure({ 
                   symbol: strat.meta.assetSymbol,
@@ -296,6 +297,15 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
           confidence
       }]);
       if (confidence > 0) setBotConfidence(confidence);
+      
+      // SYNC TO GLOBAL SYSTEM LOG
+      SystemLogStream.push({
+          type: 'INFO',
+          module: 'TacticalAI',
+          action: tag,
+          message: msg,
+          payload: { sentiment, confidence }
+      });
   };
 
   const runRobotBrainCycle = async () => {
@@ -483,6 +493,13 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
           // Split timestamp handled inside engine context now
       });
       
+      SystemLogStream.push({ 
+          type: 'INFO', 
+          module: 'Cockpit', 
+          action: 'ConfigUpdate', 
+          message: `Engine reconfigured to ${formMode} mode.` 
+      });
+      
       // Immediate chart refresh
       const historyBuffer = (GLOBAL_EXCHANGE as any).historicalBuffer || [];
       // If SIM/TRAIN, engine.currentTick is already set to the start point of that mode
@@ -498,8 +515,13 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
   };
 
   const toggleRun = () => {
-      if (engineStatus.isRunning) GLOBAL_EXCHANGE.stop();
-      else GLOBAL_EXCHANGE.start();
+      if (engineStatus.isRunning) {
+          GLOBAL_EXCHANGE.stop();
+          SystemLogStream.push({ type: 'WARNING', module: 'Cockpit', action: 'EngineStop', message: 'Simulation paused by user.' });
+      } else {
+          GLOBAL_EXCHANGE.start();
+          SystemLogStream.push({ type: 'INFO', module: 'Cockpit', action: 'EngineStart', message: 'Simulation started.' });
+      }
   };
 
   const handleSpeedChange = (val: number) => {
@@ -521,6 +543,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
       
       // Initial System Log
       addLog('SYS', `Protocol Switched: ${ROBOT_PROTOCOLS[tier].name}. Neural Link Established.`, 'NEUTRAL', 100);
+      SystemLogStream.push({ type: 'WARNING', module: 'Cockpit', action: 'RobotEngage', message: `Protocol ${tier} activated.` });
   };
 
   const disengageRobot = () => {
@@ -528,12 +551,14 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
       setNeuralState('IDLE');
       setBotConfidence(0);
       addLog('SYS', 'Manual Override. Robot Disengaged.', 'NEUTRAL', 0);
+      SystemLogStream.push({ type: 'INFO', module: 'Cockpit', action: 'RobotDisengage', message: 'Manual override engaged.' });
   };
 
   const handleManualOrder = (side: 'LONG' | 'SHORT') => {
       GLOBAL_EXCHANGE.placeOrder(side, 'MARKET', 5);
       // Force immediate update for instant feedback (User Exp: "Click -> See Pending")
       setEngineStatus({ ...GLOBAL_EXCHANGE.getStatus() });
+      SystemLogStream.push({ type: 'INFO', module: 'Cockpit', action: 'ManualOrder', message: `Placed ${side} Market Order (5 units).` });
   };
 
   const closePositions = () => {
@@ -542,6 +567,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
           const side = pos.side === 'LONG' ? 'SHORT' : 'LONG';
           GLOBAL_EXCHANGE.placeOrder(side, 'MARKET', pos.quantity);
           setEngineStatus({ ...GLOBAL_EXCHANGE.getStatus() });
+          SystemLogStream.push({ type: 'WARNING', module: 'Cockpit', action: 'Flatten', message: 'Closed all positions.' });
       }
   };
 
@@ -927,9 +953,14 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                                     <Line type="monotone" dataKey="predicted" stroke="#fa6238" strokeWidth={2} strokeDasharray="5 5" dot={false} isAnimationActive={false} connectNulls />
                                 )}
                                 
-                                {/* Robot Entry Markers */}
+                                {/* Robot Entry Markers - Chameleon Adapted */}
                                 {engineStatus.positions && (
-                                    <ReferenceLine y={engineStatus.positions.avgEntryPrice} stroke={engineStatus.positions.side === 'LONG' ? '#0bda5e' : '#fa6238'} strokeDasharray="3 3" label={{ value: 'AVG ENTRY', fill: 'white', fontSize: 10, position: 'insideRight' }} />
+                                    <ReferenceLine 
+                                        y={engineStatus.positions.avgEntryPrice} 
+                                        stroke={engineStatus.positions.side === 'LONG' ? 'var(--trend-up)' : 'var(--trend-down)'} 
+                                        strokeDasharray="3 3" 
+                                        label={{ value: 'AVG ENTRY', fill: 'white', fontSize: 10, position: 'insideRight' }} 
+                                    />
                                 )}
                             </ComposedChart>
                         </ResponsiveContainer>
@@ -939,21 +970,22 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                         <button 
                             onClick={() => handleManualOrder('LONG')} 
                             disabled={engineStatus.robot} 
-                            className="flex-1 bg-[#0bda5e]/10 border border-[#0bda5e]/30 hover:bg-[#0bda5e]/20 text-[#0bda5e] rounded-xl flex flex-col items-center justify-center transition-all group disabled:opacity-30 disabled:cursor-not-allowed active:scale-95 shadow-lg"
+                            className="flex-1 bg-[var(--trend-up)]/10 border border-[var(--trend-up)]/30 hover:bg-[var(--trend-up)]/20 text-[var(--trend-up)] rounded-xl flex flex-col items-center justify-center transition-all group disabled:opacity-30 disabled:cursor-not-allowed active:scale-95 shadow-lg"
                         >
                             <span className="text-lg font-black uppercase tracking-widest group-hover:scale-110 transition-transform">Buy / Long</span>
                             {engineStatus.robot && <span className="text-[9px] uppercase">Robot Override Active</span>}
                         </button>
                         <div className="w-48 bg-[#182234] border border-[#222f49] rounded-xl flex flex-col items-center justify-center" title="Unrealized Profit and Loss (Floating)">
                             <span className="text-[10px] text-[#90a4cb] font-bold uppercase mb-1">PnL</span>
-                            <span className={`text-2xl font-black ${engineStatus.positions && engineStatus.positions.unrealizedPnL >= 0 ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
+                            {/* Chameleon PnL Color */}
+                            <span className={`text-2xl font-black ${getTrendColor(engineStatus.positions?.unrealizedPnL || 0)}`}>
                                 {engineStatus.positions ? engineStatus.positions.unrealizedPnL.toFixed(2) : '---'}
                             </span>
                         </div>
                         <button 
                             onClick={() => handleManualOrder('SHORT')} 
                             disabled={engineStatus.robot} 
-                            className="flex-1 bg-[#fa6238]/10 border border-[#fa6238]/30 hover:bg-[#fa6238]/20 text-[#fa6238] rounded-xl flex flex-col items-center justify-center transition-all group disabled:opacity-30 disabled:cursor-not-allowed active:scale-95 shadow-lg"
+                            className="flex-1 bg-[var(--trend-down)]/10 border border-[var(--trend-down)]/30 hover:bg-[var(--trend-down)]/20 text-[var(--trend-down)] rounded-xl flex flex-col items-center justify-center transition-all group disabled:opacity-30 disabled:cursor-not-allowed active:scale-95 shadow-lg"
                         >
                             <span className="text-lg font-black uppercase tracking-widest group-hover:scale-110 transition-transform">Sell / Short</span>
                             {engineStatus.robot && <span className="text-[9px] uppercase">Robot Override Active</span>}
@@ -1010,7 +1042,8 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                                 <div key={log.id} className="flex gap-3 text-[10px] font-mono leading-tight animate-in fade-in slide-in-from-left-2">
                                     <span className="text-[#555] shrink-0">{log.timestamp}</span>
                                     <span className={`font-bold shrink-0 w-10 text-center ${log.tag === 'EXEC' ? 'text-[#0d59f2]' : log.tag === 'RISK' ? 'text-[#fa6238]' : log.tag === 'ALPHA' ? 'text-[#ffb347]' : 'text-[#90a4cb]'}`}>[{log.tag}]</span>
-                                    <span className={`break-words ${log.sentiment === 'BULL' ? 'text-[#0bda5e]' : log.sentiment === 'BEAR' ? 'text-[#fa6238]' : 'text-slate-300'}`}>{log.message}</span>
+                                    {/* Chameleon Sentiment Colors in Logs */}
+                                    <span className={`break-words ${log.sentiment === 'BULL' ? 'text-[var(--trend-up)]' : log.sentiment === 'BEAR' ? 'text-[var(--trend-down)]' : 'text-slate-300'}`}>{log.message}</span>
                                 </div>
                             ))}
                             {neuralState === 'ANALYZING' && (
@@ -1069,12 +1102,12 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
                                                     }
                                                 })()}
                                             </td>
-                                            <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
+                                            {/* Chameleon Order Side */}
+                                            <td className={`px-3 py-2 font-bold ${order.side === 'LONG' ? 'text-[var(--trend-up)]' : 'text-[var(--trend-down)]'}`}>
                                                 {order.side}
                                             </td>
                                             <td className="px-3 py-2 text-right font-mono text-white">{order.quantity}</td>
                                             <td className="px-3 py-2 text-right font-mono text-[#90a4cb]">
-                                                {/* Use fillPrice if historical/filled, else current order price */}
                                                 {(order.fillPrice || order.price).toFixed(1)}
                                             </td>
                                             <td className="px-3 py-2 text-center">

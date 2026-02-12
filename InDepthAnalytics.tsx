@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { getTrendColor, DATA_LAYERS } from './GlobalState';
+import { getTrendColor, DATA_LAYERS, SystemLogStream } from './GlobalState';
 import { GLOBAL_EXCHANGE } from './SimulationEngine';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 
@@ -70,6 +70,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
   const generateNarrative = async () => {
       if (!process.env.API_KEY) return;
       setIsGenerating(true);
+      SystemLogStream.push({ type: 'INFO', module: 'Analytics', action: 'GenerateNarrative', message: 'Requesting performance attribution...' });
       
       const context = analytics ? `
         Trading Session Analysis:
@@ -86,8 +87,10 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
               contents: `Act as a Portfolio Manager. Write a short professional performance brief (max 3 sentences) based on: ${context}`
           });
           setNarrative(response.text || "Analysis failed.");
-      } catch (e) {
+          SystemLogStream.push({ type: 'SUCCESS', module: 'Analytics', action: 'NarrativeReady', message: 'Insight generated.', payload: { text: response.text } });
+      } catch (e: any) {
           setNarrative("AI Service Unavailable.");
+          SystemLogStream.push({ type: 'ERROR', module: 'Analytics', action: 'AI_Error', message: e.message });
       } finally {
           setIsGenerating(false);
       }
@@ -211,6 +214,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                       </div>
                       <div className="bg-[#0a0c10] p-4 rounded-xl border border-[#314368] flex flex-col justify-center text-center">
                           <span className="text-[10px] text-[#90a4cb] uppercase font-bold mb-1">Net Return</span>
+                          {/* Chameleon Color for PnL */}
                           <span className={`text-2xl font-black ${getTrendColor(Number(analytics.totalPnL))}`}>{Number(analytics.totalPnL) > 0 ? '+' : ''}{analytics.totalPnL}%</span>
                       </div>
                   </div>
@@ -245,9 +249,10 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                   </div>
                   
                   <div className="h-48 w-full flex items-end gap-4 px-2 mb-6">
+                    {/* Chameleon Colors for Waterfall */}
                     {[
-                      { label: 'Gross Gain', val: analytics.grossProfit, color: '#0bda5e' },
-                      { label: 'Gross Loss', val: -analytics.grossLoss, color: '#fa6238' },
+                      { label: 'Gross Gain', val: analytics.grossProfit, color: getTrendColor(1, 'fill') }, // Up Trend Color
+                      { label: 'Gross Loss', val: -analytics.grossLoss, color: getTrendColor(-1, 'fill') }, // Down Trend Color
                       { label: 'Fees/Slip', val: (analytics.grossProfit - analytics.grossLoss) * 0.05, color: '#ffb347' }, // Est 5% Friction
                       { label: 'Net PnL', val: (analytics.grossProfit - analytics.grossLoss) * 0.95, color: '#0d59f2' }
                     ].map((bar, i, arr) => {
@@ -325,7 +330,8 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
                                         {dateStr}
                                     </td>
                                     <td className="px-6 py-3 font-bold text-white">{trade.symbol}</td>
-                                    <td className={`px-6 py-3 font-bold ${trade.side === 'LONG' ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
+                                    {/* Chameleon Colors for Side */}
+                                    <td className={`px-6 py-3 font-bold ${trade.side === 'LONG' ? 'text-[var(--trend-up)]' : 'text-[var(--trend-down)]'}`}>
                                         {trade.side}
                                     </td>
                                     <td className="px-6 py-3 text-right font-mono text-white">{trade.fillPrice ? trade.fillPrice.toFixed(2) : trade.price.toFixed(2)}</td>

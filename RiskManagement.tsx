@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { getTrendColor } from './GlobalState';
+import { getTrendColor, DATA_LAYERS, SystemLogStream } from './GlobalState';
 import { GLOBAL_EXCHANGE } from './SimulationEngine';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 
@@ -84,6 +84,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
       if (!process.env.API_KEY) return;
       setIsSimulating(true);
       setAiAnalysis(null);
+      SystemLogStream.push({ type: 'INFO', module: 'Risk', action: 'ScenarioSim', message: `Testing: ${scenario}` });
 
       const pos = engineStatus.positions;
       const context = pos 
@@ -108,12 +109,19 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
               contents: prompt
           });
           setAiAnalysis(response.text);
-      } catch (e) {
+          SystemLogStream.push({ type: 'SUCCESS', module: 'Risk', action: 'SimComplete', message: 'Analysis ready.', payload: { text: response.text } });
+      } catch (e: any) {
           setAiAnalysis("Risk Engine Offline.");
+          SystemLogStream.push({ type: 'ERROR', module: 'Risk', action: 'SimFailed', message: e.message });
       } finally {
           setIsSimulating(false);
       }
   };
+
+  const handleEmergencyHalt = () => {
+      GLOBAL_EXCHANGE.stop();
+      SystemLogStream.push({ type: 'ERROR', module: 'Risk', action: 'EmergencyHalt', message: 'MANUAL KILL SWITCH TRIGGERED.' });
+  }
 
   const navItems = [
     { label: 'Data Source', icon: 'database', view: 'dataSource' as const },
@@ -300,7 +308,8 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                   <div className="flex justify-between items-start z-10 relative">
                       <div>
                           <h3 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-tight mb-1">
-                            <span className="material-symbols-outlined text-[#fa6238]">waterfall_chart</span>
+                            {/* Icon Color now uses trend-down (typically red/green for danger/loss) */}
+                            <span className="material-symbols-outlined" style={{color: 'var(--trend-down)'}}>waterfall_chart</span>
                             Current Max Drawdown
                           </h3>
                           <p className="text-[#90a4cb] text-xs max-w-sm">
@@ -308,7 +317,8 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                           </p>
                       </div>
                       <div className="text-right bg-[#0a0c10]/80 p-2 rounded-lg border border-[#222f49] backdrop-blur-sm">
-                          <span className={`text-4xl font-black ${parseFloat(riskMetrics.maxDD) < -5 ? 'text-[#fa6238]' : 'text-[#0bda5e]'}`}>
+                          {/* Drawdown Text: Uses getTrendColor(negative_value) which maps to trend-down */}
+                          <span className={`text-4xl font-black ${getTrendColor(-parseFloat(riskMetrics.maxDD))}`}>
                               {riskMetrics.maxDD}%
                           </span>
                           <span className="block text-[9px] text-[#90a4cb] font-bold uppercase text-right">From HWM</span>
@@ -321,11 +331,11 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
                           <AreaChart data={riskMetrics.drawdownCurve}>
                               <defs>
                                   <linearGradient id="colorDD" x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="5%" stopColor="#fa6238" stopOpacity={0.3}/>
-                                      <stop offset="95%" stopColor="#fa6238" stopOpacity={0}/>
+                                      <stop offset="5%" stopColor="var(--trend-down)" stopOpacity={0.3}/>
+                                      <stop offset="95%" stopColor="var(--trend-down)" stopOpacity={0}/>
                                   </linearGradient>
                               </defs>
-                              <Area type="monotone" dataKey="value" stroke="#fa6238" strokeWidth={2} fill="url(#colorDD)" />
+                              <Area type="monotone" dataKey="value" stroke="var(--trend-down)" strokeWidth={2} fill="url(#colorDD)" />
                               <YAxis domain={['dataMin', 0]} hide />
                           </AreaChart>
                       </ResponsiveContainer>
@@ -337,7 +347,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
             <div className="col-span-12 lg:col-span-4">
               <div className="rounded-xl bg-[#182234] border border-[#222f49] p-6 h-full flex flex-col justify-center gap-3">
                 <button 
-                    onClick={() => GLOBAL_EXCHANGE.stop()} 
+                    onClick={handleEmergencyHalt} 
                     disabled={!engineStatus.isRunning}
                     className="w-full py-3 text-xs font-black uppercase bg-[#fa6238] hover:bg-[#ff7b5a] text-black rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-red-900/20"
                 >

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { getTrendColor } from './GlobalState';
+import { getTrendColor, SystemLogStream } from './GlobalState';
 import { GLOBAL_EXCHANGE, EngineMode } from './SimulationEngine';
 import { 
   PieChart, 
@@ -52,6 +52,7 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
           mode: selectedGateway === 'REAL' ? 'REAL' : 'SIMULATION' 
       });
       setEngineStatus(GLOBAL_EXCHANGE.getStatus());
+      SystemLogStream.push({ type: 'WARNING', module: 'Portfolio', action: 'AccountReset', message: `Capital reset to ${currencySymbol}${initialCapital}. Gateway: ${selectedGateway}` });
       alert(`Capital Reset to ${currencySymbol}${Number(initialCapital).toLocaleString()} | Gateway: ${selectedGateway}`);
   };
 
@@ -59,11 +60,14 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
       GLOBAL_EXCHANGE.configure({ baseCurrency: newCurrency });
       // Force update local status immediately to reflect change in UI
       setEngineStatus(GLOBAL_EXCHANGE.getStatus());
+      SystemLogStream.push({ type: 'INFO', module: 'Portfolio', action: 'CurrencySwap', message: `Base currency switched to ${newCurrency}.` });
   };
 
   const runOptimization = async () => {
       if (!process.env.API_KEY) return;
       setIsOptimizing(true);
+      SystemLogStream.push({ type: 'INFO', module: 'Portfolio', action: 'AI_Scan', message: 'Portfolio health scan initiated.' });
+      
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const pos = engineStatus.positions;
@@ -74,8 +78,10 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
           const prompt = `Act as a Portfolio Manager. ${context}. Provide a single, short strategic tip (max 20 words).`;
           const response = await ai.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
           setOptimizationTip(response.text);
-      } catch (e) {
+          SystemLogStream.push({ type: 'SUCCESS', module: 'Portfolio', action: 'AI_Result', message: 'Optimization tip ready.', payload: { tip: response.text } });
+      } catch (e: any) {
           setOptimizationTip("Optimization Service Unavailable.");
+          SystemLogStream.push({ type: 'ERROR', module: 'Portfolio', action: 'AI_Error', message: e.message });
       } finally {
           setIsOptimizing(false);
       }
@@ -349,7 +355,7 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
                                   <td className="px-6 py-4 text-right font-mono text-[#90a4cb]">{engineStatus.positions.avgEntryPrice.toFixed(2)}</td>
                                   <td className="px-6 py-4 text-right font-mono text-white">{engineStatus.positions.currentPrice.toFixed(2)}</td>
                                   <td className="px-6 py-4 text-right font-mono text-[#ffb347]">{currencySymbol}{engineStatus.positions.marginUsed.toFixed(2)}</td>
-                                  <td className={`px-6 py-4 text-right font-mono ${engineStatus.positions.unrealizedPnL >= 0 ? 'text-[#0bda5e]' : 'text-[#fa6238]'}`}>
+                                  <td className={`px-6 py-4 text-right font-mono ${getTrendColor(engineStatus.positions.unrealizedPnL)}`}>
                                       {engineStatus.positions.unrealizedPnL >= 0 ? '+' : ''}{engineStatus.positions.unrealizedPnL.toFixed(2)}
                                   </td>
                               </tr>

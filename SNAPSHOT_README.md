@@ -1,33 +1,32 @@
 
-# QuantAgrify System Snapshot (v3.3.0-almost)
+# QuantAgrify System Snapshot (v3.3.5-almost)
 
-**Timestamp:** System Freeze - Post Currency Synchronization
+**Timestamp:** System Freeze - Post Logs Center Optimization
 **Status:** **PRODUCTION READY - STABLE**
 
-## 1. Latest Updates (v3.3.0-almost)
-This snapshot solidifies the "Global Currency Context" upgrade. The system now supports dynamic switching between **USD ($)** and **CNY (¥)** across the entire simulation lifecycle.
+## 1. Version Highlights (v3.3.5-almost)
+This snapshot solidifies the platform after a series of UX/Logic refinements, specifically targeting the **System Event Bus** observability.
 
-### Key Features Fixed
-*   **Global State Persistence:** Currency selection in `PortfolioAssets` now persists in the `GLOBAL_EXCHANGE` engine config.
-*   **Cross-Module Synchronization:**
-    *   **Portfolio Assets:** Configuration entry point.
-    *   **Analysis Cockpit:** Real-time equity and PnL display.
-    *   **Risk Management:** VaR and Drawdown calculations.
-    *   **In-Depth Analytics:** Performance attribution metrics.
-*   **Simulation Mode:** Users can toggle currency freely in Simulation/Training modes (Real mode remains locked to broker feed).
+### Core Enhancements
+*   **Logs Center (Smart Auto-Scroll):** 
+    *   **Behavior:** The log terminal (`ApiLogs.tsx`) now intelligently detects user intent. It locks to the bottom for real-time monitoring when the user is at the latest entry, but automatically pauses auto-scrolling if the user scrolls up to inspect history.
+    *   **Logic:** Implemented via `useRef` latching and scroll event listeners, mimicking VS Code's terminal behavior.
+*   **Global Currency Context (Inherited from v3.3.0):**
+    *   Full USD/CNY switching capability across Portfolio, Risk, and Simulation engines.
 
-## 2. Architecture Overview
-*   **Core Engine:** `SimulationEngine.ts` (VirtualExchange) now holds the `baseCurrency` state.
-*   **Frontend:** React components subscribe to engine status updates (200ms-1000ms polling) to reflect currency changes instantly without page reloads.
+## 2. Architecture Status
+*   **Frontend Kernel:** React 18 + TypeScript. All 20+ modules loaded and linked via `GlobalState.ts`.
+*   **Data Bus:** `SystemLogStream` is fully active, capturing console, network, and internal events, feeding into the newly optimized UI.
+*   **Simulation Engine:** `VirtualExchange` is stable with Ornstein-Uhlenbeck stochastic modeling for agricultural assets.
 
 ## 3. Backend Middleware (`backend/main.py`)
-*   **Status:** Stable (v2.9.5-LTS).
-*   **Services:** GEE Proxy, JQData Bridge, CORS Handling active.
+*   **Version:** v2.9.5-LTS (No changes in this increment).
+*   **Services:** GEE Proxy, JQData Bridge active.
 
-## 4. Deployment Notes
-*   **Version:** v3.3.0-almost
-*   **Target:** Web (Responsive Desktop/Tablet).
-*   **State:** All modules (DataSource, Algorithm, Cockpit, Risk, Assets) are integrated and consistent.
+## 4. Deployment Check
+*   **Version Tag:** `3.3.5-almost`
+*   **Target:** Web / Mobile / Tablet.
+*   **Integrity:** Pass.
 
 ---
-*Snapshot v3.3.0-almost created by Lead Architect.*
+*Snapshot v3.3.5-almost created by Lead Architect.*
