@@ -352,7 +352,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
         return;
     }
 
-    setDataSourceName(jqNode.name || 'Hybrid DB (BQ/JQ)');
+    setDataSourceName("Initiating Hybrid Cloud...");
     const bridgeUrl = jqNode.url.trim().replace(/\/$/, '');
 
     try {
@@ -362,6 +362,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
             targetSymbol = manualSymbolInput;
         } else {
             targetSymbol = `${activeVariety}9999${activeExchange}`;
+            // Try to find dominant contract first
             try {
                 const domRes = await fetch(`${bridgeUrl}/api/jqdata/dominant`, {
                     method: 'POST',
@@ -411,9 +412,14 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
         if (priceData.success && priceData.data && priceData.data.length > 0) {
             setMarketData(priceData.data);
+            
+            // Set precise source label from backend response
             if (priceData.source) {
-                setDataSourceName(priceData.source === 'BigQuery' ? 'BigQuery (Cloud DB)' : 'JQData (Live API)');
+                setDataSourceName(priceData.source); 
+            } else {
+                setDataSourceName('Hybrid DB (BQ/JQ)');
             }
+            
             FUTURES_CACHE.lastFetchKey = currentKey;
             
             const len = priceData.data.length;

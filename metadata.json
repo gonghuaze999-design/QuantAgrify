@@ -1,11 +1,11 @@
 
 {
-  "description": "QuantAgrify Professional v3.3.6 (Hybrid Cloud Edition). Includes Native BigQuery Connector, Hive Partitioning Support for External Tables, and Smart Fallback logic for JQData.",
+  "description": "QuantAgrify v3.3.7 DeepTest (Deep Horizon Edition). Integrated 20-year 1min Futures History via BigQuery Hybrid Bus. Ready for Algorithm Robustness and Black Swan Stress Tests.",
   "requestFramePermissions": [
     "camera",
     "microphone",
     "geolocation"
   ],
-  "name": "QuantAgrify v3.3.6 Pro",
-  "version": "3.3.6-Pro"
+  "name": "QuantAgrify v3.3.7 DeepTest",
+  "version": "3.3.7-DeepTest"
 }

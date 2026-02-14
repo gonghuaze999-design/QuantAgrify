@@ -153,8 +153,8 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("🔴 System Shutdown.")
 
-# Set Current Version - UPDATED TO 3.3.6-PRO-HYBRID
-CURRENT_VERSION = "3.3.6-PRO-HYBRID"
+# Set Current Version - UPDATED TO 3.3.7-DEEPTEST
+CURRENT_VERSION = "3.3.7-DEEPTEST"
 
 app = FastAPI(title="QuantAgrify Middleware", version=CURRENT_VERSION, lifespan=lifespan)
 
@@ -209,7 +209,7 @@ def root():
     return {
         "status": "online",
         "version": CURRENT_VERSION,
-        "mode": "HYBRID_DATA",
+        "mode": "HYBRID_DATA_DEEPTEST",
         "global_state": {k: str(v) if k == "bq_client" else v for k, v in GLOBAL_STATE.items()}
     }
 
@@ -382,117 +382,173 @@ def auth_jq(payload: JQAuthRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-# --- NEW HYBRID PRICE ENDPOINT (BigQuery -> JQData) ---
 @app.post("/api/market/hybrid-price")
 def get_hybrid_price(payload: PriceRequest):
     """
-    Priority 1: Check BigQuery (Private DB with 1min/Daily data)
-    Priority 2: Fallback to JQData (Public API)
+    Hybrid Cloud Data Logic:
+    1. Try BigQuery (Historical Archive) - Very Fast, Low Cost.
+    2. Identify Gaps (If BQ data ends before requested end_date).
+    3. Call JQData (Live) for the gap.
+    4. Merge & Deduplicate.
     """
     symbol = payload.symbol
+    # Sanitize symbol for BQ (remove exchange suffix if needed based on your table schema)
+    # Assuming table has full symbol e.g. "C9999.XDCE"
+    safe_symbol = symbol.replace("'", "")
+    
+    # Calculate Date Range
     start_date = payload.start_date
     end_date = payload.end_date
     
-    # 1. Attempt BigQuery
-    bq_data = []
-    bq_source = False
+    if not start_date:
+        # Default to 1 year lookback if not specified
+        start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y-%m-%d")
+    if not end_date:
+        end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    bq_df = pd.DataFrame()
+    source_label = "JQData (Live)" # Default if BQ fails
     
+    # --- PHASE 1: BIGQUERY ARCHIVE ---
     if GLOBAL_STATE["bq_ready"] and GLOBAL_STATE["bq_client"]:
         try:
-            # Assumed Table Structure: quant_database.futures_1min
-            # Columns: date (TIMESTAMP/DATE), symbol (STRING), open, high, low, close, volume
-            # Note: User might need to adjust table name in a real config, assuming standard here.
+            logger.info(f"🔍 Hybrid: Checking BigQuery for {safe_symbol} ({start_date} to {end_date})...")
+            
+            # Use paramaterized query or safe string construction
+            # Assumed Schema: date (TIMESTAMP), symbol (STRING), open, high, low, close, volume
             table_id = f"{GLOBAL_STATE['active_project']}.quant_database.futures_1min"
             
-            # Simple sanitization
-            safe_symbol = symbol.replace("'", "")
-            safe_start = start_date.replace("'", "") if start_date else "2020-01-01"
-            safe_end = end_date.replace("'", "") if end_date else "2030-01-01"
-            
-            # Allow searching by filename if symbol not found (for External Table compatibility)
             query = f"""
-                SELECT date, open, high, low, close, volume
+                SELECT 
+                    FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', date) as date_str,
+                    open, high, low, close, volume
                 FROM `{table_id}`
-                WHERE (symbol = '{safe_symbol}' OR _FILE_NAME LIKE '%{safe_symbol}%')
-                AND date >= '{safe_start}' AND date <= '{safe_end}'
+                WHERE symbol = '{safe_symbol}'
+                AND date >= '{start_date}' AND date <= '{end_date}'
                 ORDER BY date ASC
             """
             
-            logger.info(f"🔍 BigQuery: Querying {symbol}...")
             query_job = GLOBAL_STATE["bq_client"].query(query)
-            rows = query_job.result()
+            rows = list(query_job.result())
             
-            for row in rows:
-                # Handle Date formatting
-                d_val = row.date
-                if hasattr(d_val, 'strftime'):
-                    d_str = d_val.strftime("%Y-%m-%d")
-                else:
-                    d_str = str(d_val).split(' ')[0]
-
-                bq_data.append({
-                    "date": d_str,
-                    "open": float(row.open),
-                    "high": float(row.high),
-                    "low": float(row.low),
-                    "close": float(row.close),
-                    "volume": float(row.volume),
-                    "source": "BigQuery (Private Cloud)"
-                })
-            
-            if len(bq_data) > 0:
-                logger.info(f"✅ BigQuery: Found {len(bq_data)} records.")
-                bq_source = True
+            if rows:
+                bq_data = []
+                for row in rows:
+                    bq_data.append({
+                        "date": row.date_str,
+                        "open": float(row.open),
+                        "high": float(row.high),
+                        "low": float(row.low),
+                        "close": float(row.close),
+                        "volume": float(row.volume)
+                    })
+                bq_df = pd.DataFrame(bq_data)
+                logger.info(f"✅ Hybrid: BQ returned {len(bq_df)} rows.")
+                source_label = "BigQuery (Cloud Archive)"
             else:
-                logger.info("⚠️ BigQuery: No records found. Falling back to JQData.")
+                logger.info("⚠️ Hybrid: BQ returned 0 rows. Full fallback to JQ.")
 
         except Exception as e:
-            logger.error(f"❌ BigQuery Failed: {e}")
-            # Do not fail, just fallback
-    
-    if bq_source:
-        return {"success": True, "data": bq_data, "source": "BigQuery"}
+            logger.error(f"❌ Hybrid: BigQuery Error: {e}")
+            # Non-fatal, continue to JQ
 
-    # 2. Fallback to JQData
-    if not JQ_AVAILABLE:
-        return {"success": False, "error": "BigQuery empty & JQSDK missing"}
+    # --- PHASE 2: GAP DETECTION & JQDATA FILL ---
+    jq_df = pd.DataFrame()
+    needs_jq = True
+    jq_start_date = start_date
 
-    try:
-        if not jq.is_auth():
-            if payload.username and payload.password:
-                jq.auth(payload.username, payload.password)
-            else:
-                return {"success": False, "error": "JQAuth required"}
+    if not bq_df.empty:
+        # Check the last timestamp in BQ
+        last_bq_date_str = bq_df.iloc[-1]['date']
+        # Simple string comparison works for ISO format
+        # If BQ data ends *before* end_date (allow 1 day buffer for T+1)
+        # We need to fill the gap.
         
-        # JQ Logic
-        if payload.start_date and payload.end_date:
-            df = jq.get_price(security=symbol, start_date=payload.start_date, end_date=payload.end_date, frequency=payload.frequency)
-        else:
-            df = jq.get_price(security=symbol, count=payload.count or 100, end_date=datetime.datetime.now(), frequency=payload.frequency)
+        # Parse for comparison
+        try:
+            last_bq_dt = datetime.datetime.strptime(str(last_bq_date_str)[:10], "%Y-%m-%d")
+            req_end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d")
             
-        if df.empty:
-            return {"success": False, "error": "No Data in JQData"}
+            if last_bq_dt >= req_end_dt or (req_end_dt - last_bq_dt).days < 1:
+                # BQ covers everything
+                needs_jq = False
+            else:
+                # Need to fill gap starting from next day
+                jq_start_date = (last_bq_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                logger.info(f"🔄 Hybrid: Gap Detected. JQData needed from {jq_start_date}...")
+                source_label = "Hybrid (BQ + JQ Live)"
+        except:
+            # Date parsing error, just force JQ to be safe
+            logger.warning("⚠️ Hybrid: Date parsing failed. Force checking JQ.")
+            pass
 
-        jq_data = []
-        for idx, row in df.iterrows():
-            jq_data.append({
-                "date": idx.strftime("%Y-%m-%d"),
-                "open": float(row['open']),
-                "high": float(row['high']),
-                "low": float(row['low']),
-                "close": float(row['close']),
-                "volume": float(row['volume']),
-                "source": "JQData (API)"
-            })
-        
-        return {"success": True, "data": jq_data, "source": "JQData"}
+    if needs_jq and JQ_AVAILABLE:
+        try:
+            if not jq.is_auth():
+                if payload.username and payload.password:
+                    jq.auth(payload.username, payload.password)
+                else:
+                    logger.warning("⚠️ Hybrid: JQ Auth missing, cannot fill gap.")
+            
+            if jq.is_auth():
+                logger.info(f"📡 Hybrid: Fetching JQData from {jq_start_date}...")
+                # Fetch
+                df = jq.get_price(
+                    security=symbol, 
+                    start_date=jq_start_date, 
+                    end_date=end_date, 
+                    frequency=payload.frequency
+                )
+                
+                if not df.empty:
+                    # Reset index to get date column if it's the index
+                    df = df.reset_index()
+                    # Rename columns to standard format
+                    df.columns = df.columns.str.lower()
+                    # Rename index column usually 'index' or 'date' to 'date'
+                    if 'index' in df.columns:
+                        df = df.rename(columns={'index': 'date'})
+                    
+                    # Convert timestamps to string format matching BQ
+                    df['date'] = df['date'].astype(str)
+                    
+                    jq_df = df[['date', 'open', 'high', 'low', 'close', 'volume']]
+                    logger.info(f"✅ Hybrid: JQData returned {len(jq_df)} rows.")
+        except Exception as e:
+            logger.error(f"❌ Hybrid: JQData Error: {e}")
 
-    except Exception as e:
-        return {"success": False, "error": f"JQ Error: {str(e)}"}
+    # --- PHASE 3: FUSION ---
+    final_df = pd.DataFrame()
+    
+    if not bq_df.empty and not jq_df.empty:
+        # Concatenate
+        final_df = pd.concat([bq_df, jq_df])
+        # Drop duplicates on date, keep last (JQ usually more updated for recent)
+        final_df = final_df.drop_duplicates(subset=['date'], keep='last')
+        final_df = final_df.sort_values(by='date')
+    elif not bq_df.empty:
+        final_df = bq_df
+    elif not jq_df.empty:
+        final_df = jq_df
+        source_label = "JQData (Live Only)" # Fallback label
+    
+    if final_df.empty:
+        return {"success": False, "error": "No data found in BQ or JQ for this range."}
+
+    # Convert to list of dicts
+    result_data = final_df.to_dict(orient='records')
+    
+    return {
+        "success": True, 
+        "data": result_data, 
+        "source": source_label,
+        "rows": len(result_data)
+    }
 
 # Keep legacy endpoint for compatibility
 @app.post("/api/jqdata/price")
 def get_price_legacy(payload: PriceRequest):
+    # Redirect legacy calls to hybrid engine for better performance
     return get_hybrid_price(payload)
 
 @app.post("/api/te/proxy")
