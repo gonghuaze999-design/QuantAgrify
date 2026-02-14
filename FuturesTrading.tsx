@@ -64,6 +64,7 @@ const FUTURES_CACHE = {
     activeSymbol: 'Scanning...',
     startDate: formatDate(lastYear),
     endDate: formatDate(today),
+    frequency: 'daily' as 'daily' | '1m', // New
     isManualMode: false,
     manualSymbolInput: '',
     dataSourceName: 'Searching Sources...',
@@ -115,6 +116,9 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
   // Date State
   const [startDate, setStartDate] = useState(FUTURES_CACHE.startDate);
   const [endDate, setEndDate] = useState(FUTURES_CACHE.endDate);
+  
+  // NEW: Frequency State
+  const [frequency, setFrequency] = useState<'daily' | '1m'>(FUTURES_CACHE.frequency);
 
   // Zoom State - Safe defaults (No need to persist zoom strictly, but could be added)
   const [leftIndex, setLeftIndex] = useState<number>(0);
@@ -146,13 +150,14 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       FUTURES_CACHE.activeSymbol = activeSymbol;
       FUTURES_CACHE.startDate = startDate;
       FUTURES_CACHE.endDate = endDate;
+      FUTURES_CACHE.frequency = frequency;
       FUTURES_CACHE.isManualMode = isManualMode;
       FUTURES_CACHE.manualSymbolInput = manualSymbolInput;
       FUTURES_CACHE.marketData = marketData;
       FUTURES_CACHE.aiSentiment = aiSentiment;
       FUTURES_CACHE.dataSourceName = dataSourceName;
       if (marketData.length > 0) FUTURES_CACHE.hasData = true;
-  }, [activeExchange, activeVariety, activeSymbol, startDate, endDate, isManualMode, manualSymbolInput, marketData, aiSentiment, dataSourceName]);
+  }, [activeExchange, activeVariety, activeSymbol, startDate, endDate, frequency, isManualMode, manualSymbolInput, marketData, aiSentiment, dataSourceName]);
 
   // --- Logic 2: Global Context Synchronization (Strategy 2) ---
   useEffect(() => {
@@ -323,7 +328,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
   };
 
   const fetchData = async () => {
-    const currentKey = `${activeVariety}-${activeExchange}-${startDate}-${endDate}-${isManualMode ? manualSymbolInput : ''}`;
+    const currentKey = `${activeVariety}-${activeExchange}-${startDate}-${endDate}-${frequency}-${isManualMode ? manualSymbolInput : ''}`;
     
     if (FUTURES_CACHE.hasData && FUTURES_CACHE.lastFetchKey === currentKey) {
         if (marketData.length > 0) {
@@ -337,6 +342,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
     setLoading(true);
     setError(null);
+    setDataSourceName("Initiating Hybrid Cloud...");
 
     fetchSpecificSentiment(activeVariety, EXCHANGE_MAPPING[activeExchange]?.name || activeExchange);
 
@@ -352,7 +358,6 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
         return;
     }
 
-    setDataSourceName("Initiating Hybrid Cloud...");
     const bridgeUrl = jqNode.url.trim().replace(/\/$/, '');
 
     try {
@@ -389,7 +394,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
         setActiveSymbol(targetSymbol);
 
         // --- UPDATED: Call Hybrid Pricing Endpoint ---
-        // This endpoint will try BigQuery first, then JQData.
+        // This endpoint handles BigQuery aggregation for Daily vs Raw for Minute
         const priceRes = await fetch(`${bridgeUrl}/api/market/hybrid-price`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -397,8 +402,8 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                 username: jqNode.username,
                 password: jqNode.password,
                 symbol: targetSymbol,
-                frequency: 'daily',
-                count: 500, 
+                frequency: frequency, // Passed from UI
+                count: 20000, // Limit for 1min requests
                 start_date: startDate,
                 end_date: endDate
             })
@@ -427,12 +432,14 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
             setRightIndex(len - 1);
         } else {
             setMarketData([]);
+            setDataSourceName('No Data Found');
             if(priceData.error) throw new Error(priceData.error);
             else throw new Error("No data returned for this range/symbol.");
         }
 
     } catch (err: any) {
         setError(err.message || "Connection failed");
+        setDataSourceName('Connection Failed');
         setMarketData([]);
     } finally {
         setLoading(false);
@@ -441,7 +448,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
   useEffect(() => {
     fetchData();
-  }, [activeVariety, activeExchange, startDate, endDate, isManualMode, manualSymbolInput]); 
+  }, [activeVariety, activeExchange, startDate, endDate, frequency, isManualMode, manualSymbolInput]); 
 
   const handleWheel = (e: any) => {
       if (!marketData.length) return;
@@ -613,7 +620,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
               <div className="grid grid-cols-12 gap-4 items-end">
                 {!isManualMode ? (
                     <>
-                        <label className="flex flex-col col-span-3">
+                        <label className="flex flex-col col-span-2">
                             <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
                                 <span className="material-symbols-outlined text-sm">account_balance</span> 1. Exchange
                             </span>
@@ -644,7 +651,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                         </label>
                     </>
                 ) : (
-                    <label className="flex flex-col col-span-6">
+                    <label className="flex flex-col col-span-5">
                         <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
                             <span className="material-symbols-outlined text-sm">code</span> Contract Code
                         </span>
@@ -658,7 +665,22 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                     </label>
                 )}
                 
-                <label className="flex flex-col col-span-3">
+                {/* NEW FREQUENCY SELECTOR */}
+                <label className="flex flex-col col-span-2">
+                    <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
+                        <span className="material-symbols-outlined text-sm">timelapse</span> Frequency
+                    </span>
+                    <select 
+                        value={frequency}
+                        onChange={(e) => setFrequency(e.target.value as 'daily' | '1m')}
+                        className="bg-[#101622] border border-[#314368] text-white text-sm rounded-lg h-10 px-3 outline-none focus:border-[#0d59f2] cursor-pointer hover:border-[#0d59f2]"
+                    >
+                        <option value="daily">Daily (1d) [Agg]</option>
+                        <option value="1m">Minute (1m) [Raw]</option>
+                    </select>
+                </label>
+
+                <label className="flex flex-col col-span-2">
                     <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
                         <span className="material-symbols-outlined text-sm">date_range</span> Start Date
                     </span>
@@ -669,7 +691,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                         className="bg-[#101622] border border-[#314368] text-white text-xs rounded-lg h-10 px-3 outline-none focus:border-[#0d59f2] uppercase font-mono cursor-pointer"
                     />
                 </label>
-                <label className="flex flex-col col-span-3">
+                <label className="flex flex-col col-span-2">
                     <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
                         <span className="material-symbols-outlined text-sm">event</span> End Date
                     </span>
@@ -703,6 +725,9 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                         {activeSymbol} 
                         <span className="px-2 py-0.5 rounded bg-[#101622] border border-[#314368] text-[10px] text-[#90a4cb] font-normal uppercase">
                             {isManualMode ? 'Manual' : 'Auto-Dominant'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase ${frequency === '1m' ? 'bg-[#0d59f2]/20 border-[#0d59f2] text-[#0d59f2]' : 'bg-[#101622] border-[#314368] text-[#90a4cb]'}`}>
+                            {frequency === '1m' ? '1-Min Resolution' : 'Daily Resolution'}
                         </span>
                       </h3>
                       <div className="flex gap-4 mt-1 items-center">

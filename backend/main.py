@@ -153,8 +153,8 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("🔴 System Shutdown.")
 
-# Set Current Version - UPDATED TO 3.3.7-DEEPTEST
-CURRENT_VERSION = "3.3.7-DEEPTEST"
+# Set Current Version - UPDATED TO 3.3.8-AGGR-FIX
+CURRENT_VERSION = "3.3.8-AGGR-FIX"
 
 app = FastAPI(title="QuantAgrify Middleware", version=CURRENT_VERSION, lifespan=lifespan)
 
@@ -209,7 +209,7 @@ def root():
     return {
         "status": "online",
         "version": CURRENT_VERSION,
-        "mode": "HYBRID_DATA_DEEPTEST",
+        "mode": "HYBRID_DATA_AGGR_FIXED",
         "global_state": {k: str(v) if k == "bq_client" else v for k, v in GLOBAL_STATE.items()}
     }
 
@@ -246,9 +246,6 @@ def check_gee_status(payload: GeeStatusRequest):
 
 @app.post("/api/bigquery/status")
 def check_bigquery_status(payload: GeeStatusRequest):
-    """
-    Specifically checks BigQuery connection and tries to list datasets
-    """
     credentials_loaded = False
     
     # Reuse the same cloud connection logic as GEE
@@ -382,26 +379,43 @@ def auth_jq(payload: JQAuthRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+def normalize_bq_symbol(symbol: str) -> str:
+    """
+    Standardize symbol format for BigQuery.
+    JQData uses 'C9999.XDCE' / 'SR9999.XZCE'
+    BigQuery likely uses 'C9999.DCE' / 'SR9999.ZCE' (Removing 'X')
+    """
+    if not symbol: return ""
+    parts = symbol.split('.')
+    if len(parts) != 2: return symbol
+    
+    code, exchange = parts
+    if exchange == 'XDCE': return f"{code}.DCE"
+    if exchange == 'XZCE': return f"{code}.ZCE"
+    if exchange == 'XSGE': return f"{code}.SHFE"
+    if exchange == 'CCFX': return f"{code}.CFFEX"
+    
+    return symbol
+
 @app.post("/api/market/hybrid-price")
 def get_hybrid_price(payload: PriceRequest):
     """
     Hybrid Cloud Data Logic:
-    1. Try BigQuery (Historical Archive) - Very Fast, Low Cost.
+    1. Try BigQuery (Historical Archive) with Smart Aggregation.
+       - If daily requested: Group by day from 1min table.
+       - If minute requested: Return raw rows.
     2. Identify Gaps (If BQ data ends before requested end_date).
     3. Call JQData (Live) for the gap.
     4. Merge & Deduplicate.
     """
     symbol = payload.symbol
-    # Sanitize symbol for BQ (remove exchange suffix if needed based on your table schema)
-    # Assuming table has full symbol e.g. "C9999.XDCE"
-    safe_symbol = symbol.replace("'", "")
+    bq_symbol = normalize_bq_symbol(symbol)
     
-    # Calculate Date Range
     start_date = payload.start_date
     end_date = payload.end_date
+    frequency = payload.frequency or 'daily'
     
     if not start_date:
-        # Default to 1 year lookback if not specified
         start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y-%m-%d")
     if not end_date:
         end_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -409,24 +423,47 @@ def get_hybrid_price(payload: PriceRequest):
     bq_df = pd.DataFrame()
     source_label = "JQData (Live)" # Default if BQ fails
     
-    # --- PHASE 1: BIGQUERY ARCHIVE ---
+    # --- PHASE 1: BIGQUERY SMART QUERY ---
     if GLOBAL_STATE["bq_ready"] and GLOBAL_STATE["bq_client"]:
         try:
-            logger.info(f"🔍 Hybrid: Checking BigQuery for {safe_symbol} ({start_date} to {end_date})...")
+            logger.info(f"🔍 Hybrid: Checking BigQuery for {bq_symbol} ({start_date} to {end_date}, Freq: {frequency})...")
             
-            # Use paramaterized query or safe string construction
-            # Assumed Schema: date (TIMESTAMP), symbol (STRING), open, high, low, close, volume
             table_id = f"{GLOBAL_STATE['active_project']}.quant_database.futures_1min"
             
-            query = f"""
-                SELECT 
-                    FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', date) as date_str,
-                    open, high, low, close, volume
-                FROM `{table_id}`
-                WHERE symbol = '{safe_symbol}'
-                AND date >= '{start_date}' AND date <= '{end_date}'
-                ORDER BY date ASC
-            """
+            # Construct Query based on Frequency
+            if frequency == 'daily' or frequency == '1d':
+                # AGGREGATION QUERY: 1min -> Daily OHLCV
+                # Note: BQ TIMESTAMP comparison should cover the full end_date
+                query = f"""
+                    SELECT 
+                        FORMAT_DATE('%Y-%m-%d', DATE(date)) as date_str,
+                        ARRAY_AGG(open ORDER BY date ASC LIMIT 1)[OFFSET(0)] as open,
+                        MAX(high) as high,
+                        MIN(low) as low,
+                        ARRAY_AGG(close ORDER BY date DESC LIMIT 1)[OFFSET(0)] as close,
+                        SUM(volume) as volume
+                    FROM `{table_id}`
+                    WHERE symbol = '{bq_symbol}'
+                    AND date >= TIMESTAMP('{start_date}') 
+                    AND date < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
+                    GROUP BY date_str
+                    ORDER BY date_str ASC
+                """
+                label_suffix = "(Aggregated)"
+            else:
+                # RAW QUERY: 1min
+                query = f"""
+                    SELECT 
+                        FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', date) as date_str,
+                        open, high, low, close, volume
+                    FROM `{table_id}`
+                    WHERE symbol = '{bq_symbol}'
+                    AND date >= TIMESTAMP('{start_date}') 
+                    AND date < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
+                    ORDER BY date ASC
+                    LIMIT 20000 
+                """
+                label_suffix = "(Raw 1min)"
             
             query_job = GLOBAL_STATE["bq_client"].query(query)
             rows = list(query_job.result())
@@ -440,17 +477,16 @@ def get_hybrid_price(payload: PriceRequest):
                         "high": float(row.high),
                         "low": float(row.low),
                         "close": float(row.close),
-                        "volume": float(row.volume)
+                        "volume": float(row.volume) if row.volume is not None else 0.0
                     })
                 bq_df = pd.DataFrame(bq_data)
-                logger.info(f"✅ Hybrid: BQ returned {len(bq_df)} rows.")
-                source_label = "BigQuery (Cloud Archive)"
+                logger.info(f"✅ Hybrid: BQ returned {len(bq_df)} rows for {bq_symbol}.")
+                source_label = f"BigQuery {label_suffix}"
             else:
-                logger.info("⚠️ Hybrid: BQ returned 0 rows. Full fallback to JQ.")
+                logger.info(f"⚠️ Hybrid: BQ returned 0 rows for {bq_symbol}. Fallback to JQ.")
 
         except Exception as e:
             logger.error(f"❌ Hybrid: BigQuery Error: {e}")
-            # Non-fatal, continue to JQ
 
     # --- PHASE 2: GAP DETECTION & JQDATA FILL ---
     jq_df = pd.DataFrame()
@@ -458,60 +494,55 @@ def get_hybrid_price(payload: PriceRequest):
     jq_start_date = start_date
 
     if not bq_df.empty:
-        # Check the last timestamp in BQ
+        # Check last date
         last_bq_date_str = bq_df.iloc[-1]['date']
-        # Simple string comparison works for ISO format
-        # If BQ data ends *before* end_date (allow 1 day buffer for T+1)
-        # We need to fill the gap.
-        
-        # Parse for comparison
         try:
-            last_bq_dt = datetime.datetime.strptime(str(last_bq_date_str)[:10], "%Y-%m-%d")
+            # Handle both date-only and datetime strings
+            if ' ' in str(last_bq_date_str):
+                last_bq_dt = datetime.datetime.strptime(str(last_bq_date_str), "%Y-%m-%d %H:%M:%S")
+            else:
+                last_bq_dt = datetime.datetime.strptime(str(last_bq_date_str), "%Y-%m-%d")
+            
             req_end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d")
             
-            if last_bq_dt >= req_end_dt or (req_end_dt - last_bq_dt).days < 1:
-                # BQ covers everything
+            # If BQ covers up to end_date (approx), we skip JQ
+            # Simplify: If gap is < 1 day, skip
+            if last_bq_dt.date() >= req_end_dt.date():
                 needs_jq = False
             else:
-                # Need to fill gap starting from next day
                 jq_start_date = (last_bq_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
                 logger.info(f"🔄 Hybrid: Gap Detected. JQData needed from {jq_start_date}...")
-                source_label = "Hybrid (BQ + JQ Live)"
-        except:
-            # Date parsing error, just force JQ to be safe
-            logger.warning("⚠️ Hybrid: Date parsing failed. Force checking JQ.")
+        except Exception as e:
+            logger.warning(f"⚠️ Hybrid: Date check failed ({e}). Force checking JQ.")
             pass
 
+    # JQData Fallback / Fill
     if needs_jq and JQ_AVAILABLE:
         try:
             if not jq.is_auth():
                 if payload.username and payload.password:
                     jq.auth(payload.username, payload.password)
-                else:
-                    logger.warning("⚠️ Hybrid: JQ Auth missing, cannot fill gap.")
             
             if jq.is_auth():
                 logger.info(f"📡 Hybrid: Fetching JQData from {jq_start_date}...")
-                # Fetch
+                
+                # JQ supports '1m' or 'daily'
+                jq_freq = '1m' if frequency in ['1m', 'minute'] else 'daily'
+                
                 df = jq.get_price(
                     security=symbol, 
                     start_date=jq_start_date, 
                     end_date=end_date, 
-                    frequency=payload.frequency
+                    frequency=jq_freq
                 )
                 
                 if not df.empty:
-                    # Reset index to get date column if it's the index
                     df = df.reset_index()
-                    # Rename columns to standard format
                     df.columns = df.columns.str.lower()
-                    # Rename index column usually 'index' or 'date' to 'date'
                     if 'index' in df.columns:
                         df = df.rename(columns={'index': 'date'})
                     
-                    # Convert timestamps to string format matching BQ
                     df['date'] = df['date'].astype(str)
-                    
                     jq_df = df[['date', 'open', 'high', 'low', 'close', 'volume']]
                     logger.info(f"✅ Hybrid: JQData returned {len(jq_df)} rows.")
         except Exception as e:
@@ -521,21 +552,19 @@ def get_hybrid_price(payload: PriceRequest):
     final_df = pd.DataFrame()
     
     if not bq_df.empty and not jq_df.empty:
-        # Concatenate
         final_df = pd.concat([bq_df, jq_df])
-        # Drop duplicates on date, keep last (JQ usually more updated for recent)
         final_df = final_df.drop_duplicates(subset=['date'], keep='last')
         final_df = final_df.sort_values(by='date')
+        source_label = f"Hybrid (BQ {label_suffix} + JQ)"
     elif not bq_df.empty:
         final_df = bq_df
     elif not jq_df.empty:
         final_df = jq_df
-        source_label = "JQData (Live Only)" # Fallback label
+        source_label = "JQData (Live Only)"
     
     if final_df.empty:
         return {"success": False, "error": "No data found in BQ or JQ for this range."}
 
-    # Convert to list of dicts
     result_data = final_df.to_dict(orient='records')
     
     return {
@@ -548,7 +577,6 @@ def get_hybrid_price(payload: PriceRequest):
 # Keep legacy endpoint for compatibility
 @app.post("/api/jqdata/price")
 def get_price_legacy(payload: PriceRequest):
-    # Redirect legacy calls to hybrid engine for better performance
     return get_hybrid_price(payload)
 
 @app.post("/api/te/proxy")
