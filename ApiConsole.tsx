@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SystemClock } from './SystemClock';
 
-type SourcePreset = 'Custom REST' | 'Google Earth Engine' | 'Google Maps API' | 'Open-Meteo' | 'USDA QuickStats' | 'USDA PSD (FAS)' | 'Datayes (通联数据)' | 'JQData (JoinQuant)' | 'Nasdaq Data Link' | 'Trading Economics';
+type SourcePreset = 'Custom REST' | 'Google BigQuery' | 'Google Earth Engine' | 'Google Maps API' | 'Open-Meteo' | 'USDA QuickStats' | 'USDA PSD (FAS)' | 'Datayes (通联数据)' | 'JQData (JoinQuant)' | 'Nasdaq Data Link' | 'Trading Economics';
 type AuthMethod = 'API Key' | 'OAuth 2.0' | 'Service Account (JSON)' | 'No Auth' | 'User/Pass';
 
 type RegionContext = 'US Corn Belt (Iowa)' | 'Brazil Soy (Mato Grosso)' | 'China Corn (Heilongjiang)' | 'Black Sea Wheat (Ukraine)';
@@ -179,10 +180,11 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
 
     try {
         // --- BRIDGE / PROXY PROVIDERS ---
-        // GEE is now handled via Backend Bridge to prevent Token Expiry
+        // GEE & BigQuery handled via Backend Bridge
         const isGEEBridge = provider === 'Google Earth Engine' && !inputUrl.includes('googleapis.com');
+        const isBQBridge = provider === 'Google BigQuery' && !inputUrl.includes('googleapis.com');
 
-        if (provider === 'JQData (JoinQuant)' || provider === 'Datayes (通联数据)' || provider === 'USDA PSD (FAS)' || provider === 'USDA QuickStats' || provider === 'Nasdaq Data Link' || provider === 'Trading Economics' || isGEEBridge) {
+        if (provider === 'JQData (JoinQuant)' || provider === 'Datayes (通联数据)' || provider === 'USDA PSD (FAS)' || provider === 'USDA QuickStats' || provider === 'Nasdaq Data Link' || provider === 'Trading Economics' || isGEEBridge || isBQBridge) {
             const start = performance.now();
             const baseUrl = inputUrl.replace(/\/$/, ''); 
             let bridgeEndpoint = '';
@@ -209,25 +211,17 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
                 bridgeEndpoint = `${baseUrl}/api/datayes/proxy`;
                 body = { token: secret, endpoint: '/api/master/getTradeCal.json?exchangeCD=XSHG' };
             } else if (isGEEBridge) {
-                // New GEE Health Check
                 bridgeEndpoint = `${baseUrl}/api/gee/status`;
                 body = { dummy: 'ping' };
-                // Inject Credentials if provided (Hot Swapping)
-                // FORCE CHECK: If user pasted JSON, we must try to parse it
                 if (authMethod === 'Service Account (JSON)' && secret && secret.trim().startsWith('{')) {
-                    try {
-                        const creds = JSON.parse(secret);
-                        body.credentials = creds;
-                    } catch (e) {
-                        return {
-                            success: false,
-                            status: 'JSON_ERR',
-                            latency: 0,
-                            authFailed: true,
-                            restricted: false,
-                            data: { error: "Invalid JSON format in Service Account Key. Must be valid JSON." }
-                        };
-                    }
+                    try { const creds = JSON.parse(secret); body.credentials = creds; } catch (e) { return { success: false, status: 'JSON_ERR', latency: 0, authFailed: true, restricted: false, data: { error: "Invalid JSON format in Service Account Key." } }; }
+                }
+            } else if (isBQBridge) {
+                // BigQuery Check
+                bridgeEndpoint = `${baseUrl}/api/bigquery/status`;
+                body = { dummy: 'ping' };
+                if (authMethod === 'Service Account (JSON)' && secret && secret.trim().startsWith('{')) {
+                    try { const creds = JSON.parse(secret); body.credentials = creds; } catch (e) { return { success: false, status: 'JSON_ERR', latency: 0, authFailed: true, restricted: false, data: { error: "Invalid JSON format in Service Account Key." } }; }
                 }
             }
 
@@ -283,8 +277,8 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
             if (response.ok) {
                 const data = await response.json();
                 
-                // GEE Status Logic
-                if (isGEEBridge) {
+                // GEE/BQ Status Logic
+                if (isGEEBridge || isBQBridge) {
                     if (data.success === false) {
                         return {
                             success: false,
@@ -450,17 +444,6 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
 
         if (response.ok) {
             const jsonData = await response.json();
-            if (provider === 'Google Earth Engine' && jsonData.error) {
-                return { 
-                    success: false, 
-                    status: response.status, 
-                    latency, 
-                    authFailed: true, 
-                    restricted: false,
-                    data: jsonData, 
-                    headers: resHeaders 
-                };
-            }
             return { success: true, status: response.status, latency, authFailed: false, restricted: false, data: jsonData, headers: resHeaders };
         } else {
             return { 
@@ -551,11 +534,11 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
         addLog('WARN', `Auto-prepending https:// to ${formData.url}`);
     }
 
-    // GEE Validation
-    if (formData.preset === 'Google Earth Engine') {
+    // GEE & BigQuery Validation
+    if (formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery') {
         if (!formData.secret || !formData.secret.trim().startsWith('{')) {
-            addLog('ERROR', 'GEE Connection Failed: Missing or invalid JSON key.');
-            alert("For Google Earth Engine, you MUST provide a valid Service Account JSON key starting with '{'.");
+            addLog('ERROR', 'Cloud Connection Failed: Missing or invalid JSON key.');
+            alert("You MUST provide a valid Service Account JSON key starting with '{'.");
             return;
         }
     }
@@ -578,11 +561,10 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
             if (result.data) addLog('DATA', JSON.stringify(result.data));
         } else if (result.success) {
             addLog(result.restricted ? 'WARN' : 'SUCCESS', `Connection Established ${result.restricted ? '[RESTRICTED]' : ''}. Latency: ${result.latency}ms`);
-            if (formData.preset === 'JQData (JoinQuant)' || formData.preset === 'Datayes (通联数据)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'USDA QuickStats' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || (formData.preset === 'Google Earth Engine' && !targetUrl.includes('googleapis'))) {
-                addLog('INFO', `Backend Bridge Status: ${result.data?.status || 'Active'}`);
-                if (formData.preset === 'Google Earth Engine' && result.data?.credentials_loaded) {
-                    addLog('SUCCESS', 'Service Account Key hot-swapped successfully on backend.');
-                }
+            
+            if (formData.preset === 'Google BigQuery') {
+                addLog('INFO', `BigQuery: Datasets Found: ${result.data?.datasets_found?.length || 0}`);
+                if (result.data?.credentials_loaded) addLog('SUCCESS', 'Credentials Hot-Swapped.');
             }
         } else {
             addLog('ERROR', `Connection Failed. Status: ${result.status}`);
@@ -662,9 +644,9 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
       if (!selectedNode || !refreshToken) return;
       addLog('REQUEST', `Rotating Access Token for ${selectedNode.name}...`);
       
-      // FORCED OVERRIDE: If GEE, user must use JSON auth now
+      // FORCED OVERRIDE: If GEE or BQ, user must use JSON auth now
       let effectiveAuthType = selectedNode.type as AuthMethod;
-      if (selectedNode.provider === 'Google Earth Engine') {
+      if (selectedNode.provider === 'Google Earth Engine' || selectedNode.provider === 'Google BigQuery') {
           effectiveAuthType = 'Service Account (JSON)';
       }
 
@@ -707,11 +689,10 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
     let auth: AuthMethod = 'API Key';
     let name = '';
     
-    if(p === 'Google Earth Engine') { 
-        // Updated to point to backend bridge by default for robustness
+    if(p === 'Google Earth Engine' || p === 'Google BigQuery') { 
         url = 'http://localhost:8000'; 
         auth = 'Service Account (JSON)';
-        name = 'GEE (Backend Relay)';
+        name = p === 'Google BigQuery' ? 'BigQuery (Private DB)' : 'GEE (Backend Relay)';
     }
     if(p === 'Open-Meteo') { url = getOpenMeteoUrl(formData.regionContext); auth = 'No Auth'; name = 'Open-Meteo (Global)'; }
     if(p === 'Datayes (通联数据)' || p === 'JQData (JoinQuant)' || p === 'USDA PSD (FAS)' || p === 'USDA QuickStats') {
@@ -720,13 +701,11 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
         name = p;
         if (p === 'JQData (JoinQuant)') auth = 'User/Pass';
     }
-    // Nasdaq Data Link Preset - Now uses Bridge
     if (p === 'Nasdaq Data Link') {
-        url = ''; // User enters Bridge URL
+        url = ''; 
         auth = 'API Key';
         name = 'Nasdaq (via Bridge)';
     }
-    // Trading Economics Preset
     if (p === 'Trading Economics') {
         url = ''; 
         auth = 'API Key';
@@ -754,8 +733,6 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
           );
       }
 
-      // ... [Truncated for brevity, logic same as before] ...
-      // Only special logic needed for GEE Auth Fail
       if (selectedNode.status === 'auth_fail') {
           return (
               <div className="p-6 bg-amber-900/10 border border-amber-500/30 rounded-xl flex flex-col items-center justify-center text-center animate-in fade-in">
@@ -763,17 +740,14 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
                   <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-2">Authentication Expired</h3>
                   <p className="text-[10px] text-amber-200/70 mb-4 max-w-[200px] leading-relaxed">
                       Provider rejected credentials despite network success.
-                      {selectedNode.provider === 'Datayes (通联数据)' && (
-                          <span className="block mt-2 font-mono bg-black/30 p-1 rounded">Code: {data?.code ?? data?.retCode} <br/> Msg: {data?.msg || data?.message || data?.retMsg}</span>
-                      )}
-                      {selectedNode.provider === 'Google Earth Engine' && (
+                      {selectedNode.provider === 'Google Earth Engine' || selectedNode.provider === 'Google BigQuery' ? (
                           <span className="block mt-2 font-mono bg-black/30 p-1 rounded text-left">
                              Backend says: {data?.error || "Check Service Account JSON"}
                           </span>
-                      )}
+                      ) : null}
                   </p>
                   <div className="w-full space-y-2">
-                      {selectedNode.provider === 'Google Earth Engine' ? (
+                      {selectedNode.provider === 'Google Earth Engine' || selectedNode.provider === 'Google BigQuery' ? (
                           <>
                             <textarea 
                                 placeholder='Paste FULL Service Account JSON here (starts with { ... })' 
@@ -800,8 +774,36 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
           );
       }
       
-      // ... [Other render blocks same as before] ...
-      
+      // Google BigQuery Specific UI
+      if (selectedNode.provider === 'Google BigQuery' && data.datasets_found) {
+          return (
+              <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                  <div className="bg-[#0d59f2]/20 border border-[#0d59f2]/30 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 mb-1">
+                         <span className="material-symbols-outlined text-[#0d59f2] text-sm">table_chart</span>
+                         <p className="text-[10px] text-[#0d59f2] font-bold uppercase">BigQuery Connected</p>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                          Project: <span className="text-white font-mono">{data.project}</span>
+                      </p>
+                  </div>
+                  <div className="bg-[#182234] p-4 rounded-lg border border-slate-700">
+                      <h4 className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest mb-3">Accessible Datasets</h4>
+                      <div className="space-y-1">
+                          {data.datasets_found.map((ds: string) => (
+                              <div key={ds} className="flex items-center gap-2 text-[10px] font-mono text-emerald-400 bg-black/30 p-1.5 rounded">
+                                  <span className="material-symbols-outlined text-xs">folder</span>
+                                  {ds}
+                              </div>
+                          ))}
+                          {data.datasets_found.length === 0 && <span className="text-slate-500 italic text-[10px]">No datasets found.</span>}
+                      </div>
+                  </div>
+              </div>
+          );
+      }
+
+      // GEE Specific UI
       if (selectedNode.provider === 'Google Earth Engine' && (data.type === 'IMAGE_COLLECTION' || data.name || data.id || data.success)) {
           return (
               <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -812,22 +814,7 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
                       </div>
                       <p className="text-[10px] text-slate-400 leading-relaxed">
                           Successfully authenticated with Google Cloud.
-                          <br/>
-                          <span className="text-white font-mono opacity-50">Latency: {selectedNode.latency}ms</span>
                       </p>
-                  </div>
-                  <div className="bg-[#182234] p-4 rounded-lg border border-slate-700">
-                      <h4 className="text-[10px] font-black text-[#0d59f2] uppercase tracking-widest mb-3">Diagnostic Echo</h4>
-                      <div className="space-y-2">
-                          <div>
-                              <span className="text-[9px] text-[#90a4cb] block mb-1">Backend Version</span>
-                              <span className="text-xs font-bold text-white uppercase">{data.backend_version || 'UNKNOWN'}</span>
-                          </div>
-                          <div>
-                              <span className="text-[9px] text-[#90a4cb] block mb-1">EE Echo Response</span>
-                              <span className="text-xs font-mono text-emerald-400 bg-black/30 p-1 rounded block">{data.response?.value || JSON.stringify(data.response)}</span>
-                          </div>
-                      </div>
                   </div>
               </div>
           );
@@ -1049,7 +1036,7 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
             </div>
         </div>
 
-        {/* Node Inspector Side Panel - Kept mostly same but updated with renderInspectorContent */}
+        {/* Node Inspector Side Panel */}
         <aside className={`w-[420px] border-l border-white/5 bg-[#0a0e17] flex flex-col shrink-0 transition-all duration-300 transform ${selectedNode ? 'translate-x-0' : 'translate-x-[440px] hidden'} absolute right-0 top-0 bottom-0 z-40 shadow-2xl`}>
             {selectedNode && (
                 <>
@@ -1127,6 +1114,7 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Provider Template</label>
                   <select value={formData.preset} onChange={e => handlePresetChange(e.target.value as SourcePreset)} className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none appearance-none cursor-pointer hover:border-white/20">
                     <option>Custom REST</option>
+                    <option>Google BigQuery</option>
                     <option>Google Earth Engine</option>
                     <option>Google Maps API</option>
                     <option>Open-Meteo</option>
@@ -1140,7 +1128,7 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
                 </div>
                 <div className="space-y-1.5 text-left">
                   <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Auth Type</label>
-                  <select value={formData.auth} onChange={e => setFormData(p => ({...p, auth: e.target.value as AuthMethod}))} disabled={formData.preset === 'Datayes (通联数据)' || formData.preset === 'JQData (JoinQuant)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'USDA QuickStats' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine'} className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none appearance-none cursor-pointer hover:border-white/20 disabled:opacity-50">
+                  <select value={formData.auth} onChange={e => setFormData(p => ({...p, auth: e.target.value as AuthMethod}))} disabled={formData.preset === 'Datayes (通联数据)' || formData.preset === 'JQData (JoinQuant)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'USDA QuickStats' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery'} className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none appearance-none cursor-pointer hover:border-white/20 disabled:opacity-50">
                     <option>API Key</option>
                     <option>OAuth 2.0</option>
                     <option>Service Account (JSON)</option>
@@ -1150,21 +1138,21 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
                 </div>
               </div>
 
-              {formData.preset === 'Google Earth Engine' && (
+              {(formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery') && (
                   <div className="space-y-1.5 text-left animate-in fade-in">
                     <p className="text-[9px] text-[#0d59f2] ml-1 flex items-center gap-1 font-bold"><span className="material-symbols-outlined text-xs">info</span> Using Backend Bridge Mode (Service Account)</p>
                   </div>
               )}
 
               <div className="space-y-1.5 text-left">
-                {(formData.preset === 'JQData (JoinQuant)' || formData.preset === 'Datayes (通联数据)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'USDA QuickStats' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine') ? (
+                {(formData.preset === 'JQData (JoinQuant)' || formData.preset === 'Datayes (通联数据)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'USDA QuickStats' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery') ? (
                     <label className="text-[9px] font-black text-[#0d59f2] uppercase tracking-widest ml-1">Bridge API URL (Python Middleware) <span className="text-rose-500">*</span></label>
                 ) : (
                     <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Endpoint URL <span className="text-rose-500">*</span></label>
                 )}
                 
-                <input value={formData.url} onChange={e => setFormData(p => ({...p, url: e.target.value}))} className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-xs font-mono text-[#0d59f2] outline-none focus:border-[#0d59f2]" placeholder={(formData.preset === 'JQData (JoinQuant)' || formData.preset === 'Datayes (通联数据)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'USDA QuickStats' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine') ? "e.g. http://localhost:8000" : "https://api.example.com/v1/health"} />
-                {(formData.preset === 'JQData (JoinQuant)' || formData.preset === 'Datayes (通联数据)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine') && <p className="text-[9px] text-[#90a4cb] ml-1 truncate">Use the Bridge URL to bypass CORS and Firewall restrictions.</p>}
+                <input value={formData.url} onChange={e => setFormData(p => ({...p, url: e.target.value}))} className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-xs font-mono text-[#0d59f2] outline-none focus:border-[#0d59f2]" placeholder={(formData.preset === 'JQData (JoinQuant)' || formData.preset === 'Datayes (通联数据)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'USDA QuickStats' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery') ? "e.g. http://localhost:8000" : "https://api.example.com/v1/health"} />
+                {(formData.preset === 'JQData (JoinQuant)' || formData.preset === 'Datayes (通联数据)' || formData.preset === 'USDA PSD (FAS)' || formData.preset === 'Nasdaq Data Link' || formData.preset === 'Trading Economics' || formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery') && <p className="text-[9px] text-[#90a4cb] ml-1 truncate">Use the Bridge URL to bypass CORS and Firewall restrictions.</p>}
               </div>
 
               {formData.preset === 'JQData (JoinQuant)' ? (
@@ -1202,17 +1190,17 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
                             onChange={e => setFormData(p => ({...p, secret: e.target.value}))} 
                             disabled={formData.auth === 'No Auth'} 
                             className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-[#0d59f2] disabled:opacity-30 disabled:cursor-not-allowed" 
-                            placeholder={formData.preset === 'Google Earth Engine' ? "Not needed for Backend Bridge" : formData.preset === 'USDA PSD (FAS)' ? "Paste USDA API Key..." : formData.preset === 'USDA QuickStats' ? "Paste NASS Key..." : formData.preset === 'Nasdaq Data Link' ? "Paste Nasdaq API Key..." : formData.preset === 'Trading Economics' ? "Paste Client:Secret or Key..." : "Paste raw key here..."} 
+                            placeholder={formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery' ? "Not needed for Backend Bridge" : formData.preset === 'USDA PSD (FAS)' ? "Paste USDA API Key..." : formData.preset === 'USDA QuickStats' ? "Paste NASS Key..." : formData.preset === 'Nasdaq Data Link' ? "Paste Nasdaq API Key..." : formData.preset === 'Trading Economics' ? "Paste Client:Secret or Key..." : "Paste raw key here..."} 
                         />
                     )}
-                    {formData.preset === 'Google Earth Engine' && <p className="text-[9px] text-[#90a4cb] ml-1 leading-relaxed"><span className="text-[#0d59f2] font-bold">Requirement:</span> Paste the FULL content of your Service Account JSON file. Do NOT use a simple API Key string.</p>}
+                    {(formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery') && <p className="text-[9px] text-[#90a4cb] ml-1 leading-relaxed"><span className="text-[#0d59f2] font-bold">Requirement:</span> Paste the FULL content of your Service Account JSON file. Do NOT use a simple API Key string.</p>}
                     {formData.preset === 'USDA PSD (FAS)' && <p className="text-[9px] text-[#90a4cb] ml-1 leading-relaxed"><span className="text-[#0d59f2] font-bold">Get Key:</span> Register at USDA FAS Portal.</p>}
                     {formData.preset === 'Nasdaq Data Link' && <p className="text-[9px] text-[#90a4cb] ml-1 leading-relaxed"><span className="text-[#0d59f2] font-bold">Get Key:</span> Register at data.nasdaq.com</p>}
                     {formData.preset === 'Trading Economics' && <p className="text-[9px] text-[#90a4cb] ml-1 leading-relaxed"><span className="text-[#0d59f2] font-bold">Format:</span> Use Key or Client:Secret.</p>}
                   </div>
               )}
 
-              <button disabled={isConnecting || !formData.url || (formData.preset === 'Google Earth Engine' && !formData.secret.trim().startsWith('{'))} onClick={executeConnection} className="w-full mt-4 py-4 bg-[#0d59f2] hover:bg-[#1a66ff] text-white font-black uppercase tracking-[0.2em] text-xs rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#0d59f2]/20 flex items-center justify-center gap-3">
+              <button disabled={isConnecting || !formData.url || ((formData.preset === 'Google Earth Engine' || formData.preset === 'Google BigQuery') && !formData.secret.trim().startsWith('{'))} onClick={executeConnection} className="w-full mt-4 py-4 bg-[#0d59f2] hover:bg-[#1a66ff] text-white font-black uppercase tracking-[0.2em] text-xs rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#0d59f2]/20 flex items-center justify-center gap-3">
                 {isConnecting ? <><div className="size-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>Verifying...</> : 'Establish Connection'}
               </button>
             </div>

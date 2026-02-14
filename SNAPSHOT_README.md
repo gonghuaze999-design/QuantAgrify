@@ -1,32 +1,35 @@
 
-# QuantAgrify System Snapshot (v3.3.5-almost)
+# QuantAgrify System Snapshot (v3.3.6 Pro)
 
-**Timestamp:** System Freeze - Post Logs Center Optimization
-**Status:** **PRODUCTION READY - STABLE**
+**Timestamp:** BigQuery Integration Complete
+**Status:** **PRODUCTION READY - HYBRID CLOUD**
 
-## 1. Version Highlights (v3.3.5-almost)
-This snapshot solidifies the platform after a series of UX/Logic refinements, specifically targeting the **System Event Bus** observability.
+## 1. Version Highlights (v3.3.6 Pro)
+This snapshot marks the transition to a **Hybrid Data Architecture**, allowing the system to handle terabyte-scale historical data (via Google Cloud BigQuery) alongside real-time market streams.
 
 ### Core Enhancements
-*   **Logs Center (Smart Auto-Scroll):** 
-    *   **Behavior:** The log terminal (`ApiLogs.tsx`) now intelligently detects user intent. It locks to the bottom for real-time monitoring when the user is at the latest entry, but automatically pauses auto-scrolling if the user scrolls up to inspect history.
-    *   **Logic:** Implemented via `useRef` latching and scroll event listeners, mimicking VS Code's terminal behavior.
-*   **Global Currency Context (Inherited from v3.3.0):**
-    *   Full USD/CNY switching capability across Portfolio, Risk, and Simulation engines.
+*   **BigQuery Native Connector:** 
+    *   **Behavior:** The backend now prioritizes `Google Cloud BigQuery` for historical OHLCV data queries. It supports **External Tables** linked to GCS Buckets, enabling query-in-place for massive CSV datasets without importing them.
+    *   **Fallback Logic:** If BigQuery returns no data (or connection fails), the system automatically fails over to `JQData` (Live API), ensuring zero downtime.
+*   **Hive Partitioning Support:** 
+    *   Recognizes folder structures in GCS (e.g., `gs://bucket/Corn/2023/*.csv`) as virtual columns, allowing efficient filtering by asset class without database restructuring.
 
 ## 2. Architecture Status
-*   **Frontend Kernel:** React 18 + TypeScript. All 20+ modules loaded and linked via `GlobalState.ts`.
-*   **Data Bus:** `SystemLogStream` is fully active, capturing console, network, and internal events, feeding into the newly optimized UI.
-*   **Simulation Engine:** `VirtualExchange` is stable with Ornstein-Uhlenbeck stochastic modeling for agricultural assets.
+*   **Frontend Kernel:** React 18 + TypeScript. `FuturesTrading.tsx` now displays the active data source (Cloud DB vs. Live API) in the header.
+*   **Data Bus:** `ApiConsole.tsx` updated with specific diagnostics for BigQuery credentials and dataset discovery.
+*   **Simulation Engine:** Unchanged (Ornstein-Uhlenbeck stochastic modeling).
 
 ## 3. Backend Middleware (`backend/main.py`)
-*   **Version:** v2.9.5-LTS (No changes in this increment).
-*   **Services:** GEE Proxy, JQData Bridge active.
+*   **Version:** v3.3.6-PRO-HYBRID
+*   **Services:** 
+    *   GEE Proxy (Satellite)
+    *   BigQuery Client (Historical Data)
+    *   JQData Bridge (Real-time Fallback)
 
 ## 4. Deployment Check
-*   **Version Tag:** `3.3.5-almost`
+*   **Version Tag:** `3.3.6-Pro`
 *   **Target:** Web / Mobile / Tablet.
 *   **Integrity:** Pass.
 
 ---
-*Snapshot v3.3.5-almost created by Lead Architect.*
+*Snapshot v3.3.6 Pro created by Lead Architect.*

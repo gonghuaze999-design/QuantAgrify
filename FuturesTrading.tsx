@@ -352,7 +352,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
         return;
     }
 
-    setDataSourceName(jqNode.name || 'JQData Bridge');
+    setDataSourceName(jqNode.name || 'Hybrid DB (BQ/JQ)');
     const bridgeUrl = jqNode.url.trim().replace(/\/$/, '');
 
     try {
@@ -387,7 +387,9 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
         setActiveSymbol(targetSymbol);
 
-        const priceRes = await fetch(`${bridgeUrl}/api/jqdata/price`, {
+        // --- UPDATED: Call Hybrid Pricing Endpoint ---
+        // This endpoint will try BigQuery first, then JQData.
+        const priceRes = await fetch(`${bridgeUrl}/api/market/hybrid-price`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -409,6 +411,9 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
         if (priceData.success && priceData.data && priceData.data.length > 0) {
             setMarketData(priceData.data);
+            if (priceData.source) {
+                setDataSourceName(priceData.source === 'BigQuery' ? 'BigQuery (Cloud DB)' : 'JQData (Live API)');
+            }
             FUTURES_CACHE.lastFetchKey = currentKey;
             
             const len = priceData.data.length;
@@ -563,7 +568,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
             <div className="flex gap-3">
               <div className="flex items-center bg-[#182234] border border-[#314368] rounded-lg px-3 py-1 gap-2">
                 <span className="text-[10px] text-[#90a4cb] uppercase font-bold tracking-tighter">Connection:</span>
-                <span className="text-xs font-mono font-bold text-emerald-400 truncate max-w-[100px]">{dataSourceName}</span>
+                <span className={`text-xs font-mono font-bold truncate max-w-[150px] ${dataSourceName.includes('BigQuery') ? 'text-[#0d59f2]' : 'text-emerald-400'}`}>{dataSourceName}</span>
               </div>
               <button 
                 onClick={() => { FUTURES_CACHE.lastFetchKey = ''; fetchData(); }} 

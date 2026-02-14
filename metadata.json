@@ -1,11 +1,11 @@
 
 {
-  "description": "QuantAgrify Professional v3.3.5 (Full Suite). Includes Smart Log Streaming, Backend Bridge (Python FastAPI), and OEMS Closed Loop. Currency Context and Risk Engine fully synchronized.",
+  "description": "QuantAgrify Professional v3.3.6 (Hybrid Cloud Edition). Includes Native BigQuery Connector, Hive Partitioning Support for External Tables, and Smart Fallback logic for JQData.",
   "requestFramePermissions": [
     "camera",
     "microphone",
     "geolocation"
   ],
-  "name": "QuantAgrify v3.3.5 Pro",
-  "version": "3.3.5-almost"
+  "name": "QuantAgrify v3.3.6 Pro",
+  "version": "3.3.6-Pro"
 }
