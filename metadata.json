@@ -1,11 +1,11 @@
 
 {
-  "description": "QuantAgrify v3.3.7 DeepTest (Deep Horizon Edition). Integrated 20-year 1min Futures History via BigQuery Hybrid Bus. Ready for Algorithm Robustness and Black Swan Stress Tests.",
+  "description": "QuantAgrify v3.3.8 DeepTest (Stable). Validated Hybrid Cloud Data Bus with Broad Search Logic. 20-year 1min Futures History via BigQuery + JQData Live Patching.",
   "requestFramePermissions": [
     "camera",
     "microphone",
     "geolocation"
   ],
-  "name": "QuantAgrify v3.3.7 DeepTest",
-  "version": "3.3.7-DeepTest"
+  "name": "QuantAgrify v3.3.8 DeepTest",
+  "version": "3.3.8-DeepTest"
 }

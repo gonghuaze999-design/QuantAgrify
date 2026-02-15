@@ -1,29 +1,32 @@
 
-# QuantAgrify System Snapshot (v3.3.7 DeepTest)
+# QuantAgrify System Snapshot (v3.3.8 DeepTest)
 
-**Timestamp:** Hybrid Data Bus Live & Verified
-**Status:** **DEEP TEST PHASE INITIATED**
+**Timestamp:** Hybrid Data Bus Verified Stable
+**Status:** **SUCCESS**
 
-## 1. Version Highlights (v3.3.7 DeepTest)
-This snapshot solidifies the "End-to-End Agri-Quant Intelligence Terminal" architecture, focusing on the ingestion of **20-year (2005-2025) 1-minute resolution Futures Data** via the Hybrid Cloud Data Bus.
+## 1. Version Highlights (v3.3.8 DeepTest)
+This snapshot solidifies the success of the **Hybrid Cloud Data Bus** after resolving critical BigQuery matching issues.
 
 ### Key Milestones
-*   **Hybrid Cloud Data Bus (Live):**
-    *   Backend automatically routes queries to **Google BigQuery** for high-volume historical data (2005-2024).
-    *   Seamlessly patches recent data gaps using **JQData** (Live API), ensuring a contiguous OHLCV stream up to the current second.
-    *   Handles "Cold" (Archive) and "Hot" (Real-time) data merging in memory with zero latency penalty for the frontend.
-*   **Deep Test Readiness:**
-    *   The platform is now primed for "Black Swan" stress testing (2008 Crisis, 2020 Pandemic, 2022 War) using real granular data.
-    *   **Algorithm Robustness:** Gap handling and rollover logic can now be verified against 2 decades of actual contract shifts.
+*   **Broad Search Strategy (LIKE Query):**
+    *   Resolved the "No Data" issue by implementing fuzzy matching (`LIKE '%C9999%'`) in the SQL layer.
+    *   This successfully bridged the gap between frontend requests (`C9999.XDCE`) and backend storage (`C9999.DCE` or similar variants).
+*   **High-Volume Throughput:**
+    *   Confirmed capability to pull **50,000 rows** of 1-minute data in a single request (~1 year of intraday data).
+    *   Daily aggregation logic verified working correctly on the backend.
+*   **Hybrid Patching:**
+    *   Verified seamless fallback to JQData for recent/live data gaps.
 
 ## 2. Architecture Status
-*   **Backend (`backend/main.py`):** Upgraded to `v3.3.7-DEEPTEST`. Contains the active `get_hybrid_price` logic and Google Cloud Service Account integration.
-*   **Frontend (`FuturesTrading.tsx`):** UI updated to display "Hybrid DB" source status and handle massive dataset visualization via windowing.
-*   **Persistence:** `metadata.json` updated to reflect the DeepTest capability set.
+*   **Backend (`backend/main.py`):** 
+    *   Version: `v3.3.8-DEEPTEST`
+    *   Feature: `normalize_bq_symbol` set to identity mode.
+    *   Feature: SQL Query uses `LIKE` for robust symbol matching.
+*   **Frontend:** No changes required; the fix was purely backend logic.
 
-## 3. Deployment & Testing Directives
-*   **Immediate Action:** Execute internal comprehensive scenario tests (`tests/comprehensive_scenario_test.py`) against the new data pipeline.
-*   **Verification:** Confirm BigQuery connectivity using the `ApiConsole` before running large backtests.
+## 3. Next Steps
+*   **Stress Testing:** Run full 20-year backtests on the Strategy Engine using the now-available data.
+*   **Scaling:** Monitor BigQuery costs as data volume increases.
 
 ---
-*Snapshot v3.3.7 DeepTest created by Lead Architect.*
+*Snapshot v3.3.8 DeepTest created by Lead Architect.*

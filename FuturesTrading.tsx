@@ -346,19 +346,36 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
     fetchSpecificSentiment(activeVariety, EXCHANGE_MAPPING[activeExchange]?.name || activeExchange);
 
+    // --- LOGIC FIX: SMART BACKEND DISCOVERY ---
+    // 1. Try to find a configured backend URL from ANY valid provider, not just JQData.
+    // 2. Allow empty credentials if JQData is not configured (for BigQuery-only mode).
     const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
-    const jqNode = savedConns.find((c: any) => c.provider === 'JQData (JoinQuant)' && c.status === 'online') || 
-                   savedConns.find((c: any) => c.provider === 'JQData (JoinQuant)');
+    
+    let bridgeUrl = 'http://localhost:8000'; // Default fallback
+    let jqCreds = { username: '', password: '' };
+    // let foundBackend = false;
 
-    if (!jqNode || !jqNode.username) {
-        setLoading(false);
-        setError("JQData Credentials not found in API Console.");
-        setDataSourceName("No Connection");
-        setActiveSymbol("---");
-        return;
+    // Priority 1: JQData (Has Auth)
+    const jqNode = savedConns.find((c: any) => c.provider === 'JQData (JoinQuant)');
+    if (jqNode && jqNode.url) {
+        bridgeUrl = jqNode.url.trim().replace(/\/$/, '');
+        jqCreds.username = jqNode.username || '';
+        jqCreds.password = jqNode.password || '';
+        // foundBackend = true;
+    } 
+    // Priority 2: Other Backend-Bridge Providers (GEE, BigQuery)
+    else {
+        const altNode = savedConns.find((c: any) => (c.provider === 'Google Earth Engine' || c.provider === 'Google BigQuery') && c.url);
+        if (altNode && altNode.url) {
+            bridgeUrl = altNode.url.trim().replace(/\/$/, '');
+            // foundBackend = true;
+        }
     }
 
-    const bridgeUrl = jqNode.url.trim().replace(/\/$/, '');
+    // If we have no credentials, we log a warning but DO NOT STOP.
+    if (!jqCreds.username) {
+        console.warn("[FuturesTrading] No JQData credentials found. Attempting BigQuery-only mode.");
+    }
 
     try {
         let targetSymbol = "";
@@ -367,27 +384,31 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
             targetSymbol = manualSymbolInput;
         } else {
             targetSymbol = `${activeVariety}9999${activeExchange}`;
-            // Try to find dominant contract first
-            try {
-                const domRes = await fetch(`${bridgeUrl}/api/jqdata/dominant`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: jqNode.username,
-                        password: jqNode.password,
-                        variety: activeVariety 
-                    })
-                });
-                
-                if (domRes.ok) {
-                    const domData = await domRes.json();
-                    if (domData.success && domData.dominant) {
-                        targetSymbol = domData.dominant;
-                        if(!targetSymbol.includes('.')) targetSymbol += activeExchange;
+            
+            // Only try to fetch dominant contract if we actually have JQ credentials.
+            // Otherwise, stick to the index/main contract (9999) to avoid auth errors.
+            if (jqCreds.username && jqCreds.password) {
+                try {
+                    const domRes = await fetch(`${bridgeUrl}/api/jqdata/dominant`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: jqCreds.username,
+                            password: jqCreds.password,
+                            variety: activeVariety 
+                        })
+                    });
+                    
+                    if (domRes.ok) {
+                        const domData = await domRes.json();
+                        if (domData.success && domData.dominant) {
+                            targetSymbol = domData.dominant;
+                            if(!targetSymbol.includes('.')) targetSymbol += activeExchange;
+                        }
                     }
+                } catch (e) {
+                    console.warn("Dominant fetch failed, using index:", targetSymbol);
                 }
-            } catch (e) {
-                console.warn("Dominant fetch failed, using index:", targetSymbol);
             }
         }
 
@@ -395,12 +416,13 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
 
         // --- UPDATED: Call Hybrid Pricing Endpoint ---
         // This endpoint handles BigQuery aggregation for Daily vs Raw for Minute
+        // We pass whatever credentials we have (even empty ones).
         const priceRes = await fetch(`${bridgeUrl}/api/market/hybrid-price`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                username: jqNode.username,
-                password: jqNode.password,
+                username: jqCreds.username,
+                password: jqCreds.password,
                 symbol: targetSymbol,
                 frequency: frequency, // Passed from UI
                 count: 20000, // Limit for 1min requests
@@ -410,7 +432,8 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
         });
         
         if (!priceRes.ok) {
-             throw new Error(`API Error ${priceRes.status}`);
+             // If we get a connection error here, it means the backend URL is unreachable
+             throw new Error(`Backend Unreachable (${bridgeUrl}). Check API Console.`);
         }
 
         const priceData = await priceRes.json();
@@ -422,7 +445,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
             if (priceData.source) {
                 setDataSourceName(priceData.source); 
             } else {
-                setDataSourceName('Hybrid DB (BQ/JQ)');
+                setDataSourceName('Hybrid DB');
             }
             
             FUTURES_CACHE.lastFetchKey = currentKey;
@@ -432,9 +455,18 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
             setRightIndex(len - 1);
         } else {
             setMarketData([]);
-            setDataSourceName('No Data Found');
-            if(priceData.error) throw new Error(priceData.error);
-            else throw new Error("No data returned for this range/symbol.");
+            // Provide a more helpful error message
+            if (priceData.error) {
+                if (priceData.error.includes("No data")) {
+                    setDataSourceName(jqCreds.username ? 'No Data (Check Date)' : 'No Data (Check BQ)');
+                } else {
+                    setDataSourceName('Backend Error');
+                }
+                throw new Error(priceData.error);
+            } else {
+                setDataSourceName('No Data');
+                throw new Error("No data returned. If using BigQuery only, ensure date range matches DB.");
+            }
         }
 
     } catch (err: any) {
@@ -665,7 +697,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
                     </label>
                 )}
                 
-                {/* NEW FREQUENCY SELECTOR */}
+                {/* FREQUENCY SELECTOR */}
                 <label className="flex flex-col col-span-2">
                     <span className="text-[#90a4cb] text-[10px] font-bold uppercase mb-2 tracking-wide flex items-center gap-2">
                         <span className="material-symbols-outlined text-sm">timelapse</span> Frequency

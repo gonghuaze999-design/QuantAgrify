@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import pandas as pd
 import requests
 import urllib3
+from google.oauth2.service_account import Credentials # Ensure this is imported
 
 # 1. Disable SSL Warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -40,6 +41,7 @@ try:
     import ee
     from google.oauth2.service_account import Credentials
     import google.auth.exceptions
+    import google.auth
     GEE_IMPORTED = True
 except ImportError:
     GEE_IMPORTED = False
@@ -86,7 +88,7 @@ def attempt_cloud_connection(creds_json: Optional[Dict] = None) -> bool:
         # Step 1: Resolve Credentials
         if creds_json:
             # Hot Swap
-            logger.info("🔑 Cloud: Using provided JSON credentials...")
+            logger.info("🔑 Cloud: Using provided JSON credentials from Client...")
             credentials = Credentials.from_service_account_info(creds_json, scopes=GEE_SCOPES)
             project_id = creds_json.get('project_id')
         
@@ -102,14 +104,26 @@ def attempt_cloud_connection(creds_json: Optional[Dict] = None) -> bool:
                 logger.error(f"❌ {error_msg}")
                 GLOBAL_STATE["gee_error"] = error_msg
                 return False
+        
+        # Auto-detect service_account.json in root
+        elif os.path.exists("service_account.json"):
+            logger.info("🔑 Cloud: Found service_account.json in root directory...")
+            try:
+                credentials = Credentials.from_service_account_file("service_account.json", scopes=GEE_SCOPES)
+                project_id = credentials.project_id
+            except Exception as e:
+                logger.error(f"❌ Failed to load local json: {e}")
+
         else:
             # Local Default
-            logger.info("🔑 Cloud: Attempting local default credentials...")
-            # For local dev, we might rely on 'gcloud auth application-default login'
-            credentials, project_id = google.auth.default(scopes=GEE_SCOPES)
+            logger.info("🔑 Cloud: Attempting local default credentials (gcloud)...")
+            try:
+                credentials, project_id = google.auth.default(scopes=GEE_SCOPES)
+            except Exception as e:
+                logger.warning(f"⚠️ Default auth failed: {e}")
 
         # Step 2: Initialize Earth Engine
-        if GEE_IMPORTED:
+        if GEE_IMPORTED and credentials:
             try:
                 logger.info(f"🌍 GEE: Initializing (Project: {project_id})...")
                 ee.Initialize(credentials=credentials, project=project_id)
@@ -127,7 +141,9 @@ def attempt_cloud_connection(creds_json: Optional[Dict] = None) -> bool:
                 logger.info(f"🗄️ BigQuery: Initializing Client...")
                 GLOBAL_STATE["bq_client"] = bigquery.Client(credentials=credentials, project=project_id)
                 GLOBAL_STATE["bq_ready"] = True
-                logger.info("✅ BigQuery: Client Ready.")
+                # Force project ID update if hot-swapped
+                GLOBAL_STATE["active_project"] = project_id 
+                logger.info(f"✅ BigQuery: Client Ready (Project: {project_id}).")
             except Exception as e:
                 logger.error(f"❌ BigQuery Init Failed: {e}")
                 GLOBAL_STATE["bq_ready"] = False
@@ -136,6 +152,7 @@ def attempt_cloud_connection(creds_json: Optional[Dict] = None) -> bool:
 
     except Exception as e:
         logger.error(f"❌ Cloud Critical Failure: {str(e)}")
+        traceback.print_exc()
         return False
     
     return False
@@ -153,8 +170,8 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("🔴 System Shutdown.")
 
-# Set Current Version - UPDATED TO 3.3.8-AGGR-FIX
-CURRENT_VERSION = "3.3.8-AGGR-FIX"
+# Set Current Version
+CURRENT_VERSION = "3.3.8-DEEPTEST"
 
 app = FastAPI(title="QuantAgrify Middleware", version=CURRENT_VERSION, lifespan=lifespan)
 
@@ -381,35 +398,29 @@ def auth_jq(payload: JQAuthRequest):
 
 def normalize_bq_symbol(symbol: str) -> str:
     """
-    Standardize symbol format for BigQuery.
-    JQData uses 'C9999.XDCE' / 'SR9999.XZCE'
-    BigQuery likely uses 'C9999.DCE' / 'SR9999.ZCE' (Removing 'X')
+    STRICT IDENTITY FUNCTION:
+    BigQuery contains full standard codes (e.g. 'C9999.XDCE').
+    Do NOT convert to lowercase or strip suffix.
+    Just remove whitespace safety.
     """
     if not symbol: return ""
-    parts = symbol.split('.')
-    if len(parts) != 2: return symbol
-    
-    code, exchange = parts
-    if exchange == 'XDCE': return f"{code}.DCE"
-    if exchange == 'XZCE': return f"{code}.ZCE"
-    if exchange == 'XSGE': return f"{code}.SHFE"
-    if exchange == 'CCFX': return f"{code}.CFFEX"
-    
-    return symbol
+    return symbol.strip()
 
 @app.post("/api/market/hybrid-price")
 def get_hybrid_price(payload: PriceRequest):
     """
     Hybrid Cloud Data Logic:
     1. Try BigQuery (Historical Archive) with Smart Aggregation.
-       - If daily requested: Group by day from 1min table.
-       - If minute requested: Return raw rows.
-    2. Identify Gaps (If BQ data ends before requested end_date).
+    2. Identify Gaps.
     3. Call JQData (Live) for the gap.
     4. Merge & Deduplicate.
     """
     symbol = payload.symbol
     bq_symbol = normalize_bq_symbol(symbol)
+    
+    # EXTRACT ROOT SYMBOL FOR BROAD SEARCH (e.g. "C9999.XDCE" -> "C9999")
+    # This allows searching via LIKE to handle any minor format discrepancies in the DB
+    root_symbol = bq_symbol.split('.')[0] if '.' in bq_symbol else bq_symbol
     
     start_date = payload.start_date
     end_date = payload.end_date
@@ -426,42 +437,44 @@ def get_hybrid_price(payload: PriceRequest):
     # --- PHASE 1: BIGQUERY SMART QUERY ---
     if GLOBAL_STATE["bq_ready"] and GLOBAL_STATE["bq_client"]:
         try:
-            logger.info(f"🔍 Hybrid: Checking BigQuery for {bq_symbol} ({start_date} to {end_date}, Freq: {frequency})...")
+            logger.info(f"🔍 Hybrid: Checking BigQuery for {bq_symbol} (Root: {root_symbol}) ({start_date} to {end_date}, Freq: {frequency})...")
             
             table_id = f"{GLOBAL_STATE['active_project']}.quant_database.futures_1min"
             
-            # Construct Query based on Frequency
             if frequency == 'daily' or frequency == '1d':
                 # AGGREGATION QUERY: 1min -> Daily OHLCV
-                # Note: BQ TIMESTAMP comparison should cover the full end_date
+                # Using timestamp_field_0 as per user verification
+                # BROAD MATCHING: Use LIKE with root_symbol
                 query = f"""
                     SELECT 
-                        FORMAT_DATE('%Y-%m-%d', DATE(date)) as date_str,
-                        ARRAY_AGG(open ORDER BY date ASC LIMIT 1)[OFFSET(0)] as open,
+                        FORMAT_TIMESTAMP('%Y-%m-%d', timestamp_field_0) as date_str,
+                        ARRAY_AGG(open ORDER BY timestamp_field_0 ASC LIMIT 1)[OFFSET(0)] as open,
                         MAX(high) as high,
                         MIN(low) as low,
-                        ARRAY_AGG(close ORDER BY date DESC LIMIT 1)[OFFSET(0)] as close,
+                        ARRAY_AGG(close ORDER BY timestamp_field_0 DESC LIMIT 1)[OFFSET(0)] as close,
                         SUM(volume) as volume
                     FROM `{table_id}`
-                    WHERE symbol = '{bq_symbol}'
-                    AND date >= TIMESTAMP('{start_date}') 
-                    AND date < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
+                    WHERE contract LIKE '%{root_symbol}%'
+                    AND timestamp_field_0 >= TIMESTAMP('{start_date}') 
+                    AND timestamp_field_0 < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
                     GROUP BY date_str
                     ORDER BY date_str ASC
                 """
                 label_suffix = "(Aggregated)"
             else:
                 # RAW QUERY: 1min
+                # UPGRADED LIMIT to 50000
+                # BROAD MATCHING: Use LIKE with root_symbol
                 query = f"""
                     SELECT 
-                        FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', date) as date_str,
+                        FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', timestamp_field_0) as date_str,
                         open, high, low, close, volume
                     FROM `{table_id}`
-                    WHERE symbol = '{bq_symbol}'
-                    AND date >= TIMESTAMP('{start_date}') 
-                    AND date < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
-                    ORDER BY date ASC
-                    LIMIT 20000 
+                    WHERE contract LIKE '%{root_symbol}%'
+                    AND timestamp_field_0 >= TIMESTAMP('{start_date}') 
+                    AND timestamp_field_0 < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
+                    ORDER BY timestamp_field_0 ASC
+                    LIMIT 50000 
                 """
                 label_suffix = "(Raw 1min)"
             
@@ -483,7 +496,7 @@ def get_hybrid_price(payload: PriceRequest):
                 logger.info(f"✅ Hybrid: BQ returned {len(bq_df)} rows for {bq_symbol}.")
                 source_label = f"BigQuery {label_suffix}"
             else:
-                logger.info(f"⚠️ Hybrid: BQ returned 0 rows for {bq_symbol}. Fallback to JQ.")
+                logger.info(f"⚠️ Hybrid: BQ returned 0 rows for {bq_symbol} (Root: {root_symbol}). Fallback to JQ.")
 
         except Exception as e:
             logger.error(f"❌ Hybrid: BigQuery Error: {e}")
@@ -494,10 +507,8 @@ def get_hybrid_price(payload: PriceRequest):
     jq_start_date = start_date
 
     if not bq_df.empty:
-        # Check last date
         last_bq_date_str = bq_df.iloc[-1]['date']
         try:
-            # Handle both date-only and datetime strings
             if ' ' in str(last_bq_date_str):
                 last_bq_dt = datetime.datetime.strptime(str(last_bq_date_str), "%Y-%m-%d %H:%M:%S")
             else:
@@ -505,8 +516,6 @@ def get_hybrid_price(payload: PriceRequest):
             
             req_end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d")
             
-            # If BQ covers up to end_date (approx), we skip JQ
-            # Simplify: If gap is < 1 day, skip
             if last_bq_dt.date() >= req_end_dt.date():
                 needs_jq = False
             else:
@@ -525,23 +534,13 @@ def get_hybrid_price(payload: PriceRequest):
             
             if jq.is_auth():
                 logger.info(f"📡 Hybrid: Fetching JQData from {jq_start_date}...")
-                
-                # JQ supports '1m' or 'daily'
                 jq_freq = '1m' if frequency in ['1m', 'minute'] else 'daily'
-                
-                df = jq.get_price(
-                    security=symbol, 
-                    start_date=jq_start_date, 
-                    end_date=end_date, 
-                    frequency=jq_freq
-                )
-                
+                df = jq.get_price(security=symbol, start_date=jq_start_date, end_date=end_date, frequency=jq_freq)
                 if not df.empty:
                     df = df.reset_index()
                     df.columns = df.columns.str.lower()
                     if 'index' in df.columns:
                         df = df.rename(columns={'index': 'date'})
-                    
                     df['date'] = df['date'].astype(str)
                     jq_df = df[['date', 'open', 'high', 'low', 'close', 'volume']]
                     logger.info(f"✅ Hybrid: JQData returned {len(jq_df)} rows.")

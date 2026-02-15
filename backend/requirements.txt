@@ -1,13 +1,10 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-jqdatasdk==1.8.11
-pydantic==2.5.2
-pandas==2.1.3
-requests==2.31.0
-curl_cffi>=0.6.0
-earthengine-api>=0.1.370
-google-auth>=2.0.0
-google-cloud-bigquery>=3.13.0
-db-dtypes>=1.2.0
-cryptography>=41.0.0
-pyOpenSSL>=23.0.0
+fastapi>=0.104.1
+uvicorn>=0.24.0
+pydantic>=2.5.2
+pandas>=2.0.0
+requests>=2.31.0
+# Google Cloud libs (Let pip resolve versions to avoid grpcio crashes)
+earthengine-api
+google-auth
+google-cloud-bigquery
+db-dtypes

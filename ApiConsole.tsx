@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SystemClock } from './SystemClock';
 
@@ -213,6 +214,7 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
             } else if (isGEEBridge) {
                 bridgeEndpoint = `${baseUrl}/api/gee/status`;
                 body = { dummy: 'ping' };
+                // Send JSON Creds directly if provided
                 if (authMethod === 'Service Account (JSON)' && secret && secret.trim().startsWith('{')) {
                     try { const creds = JSON.parse(secret); body.credentials = creds; } catch (e) { return { success: false, status: 'JSON_ERR', latency: 0, authFailed: true, restricted: false, data: { error: "Invalid JSON format in Service Account Key." } }; }
                 }
@@ -615,7 +617,23 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
           targetUrl = getOpenMeteoUrl('', testLat, testLon);
           addLog('INFO', `Injecting Test Coordinates: ${testLat}, ${testLon}`);
       }
-      const result = await pingUrl(targetUrl, selectedNode.type as AuthMethod, selectedNode.key || '', selectedNode.proxy, selectedNode.projectId, selectedNode.provider, selectedNode.provider === 'JQData (JoinQuant)' ? selectedNode.username : undefined, selectedNode.provider === 'JQData (JoinQuant)' ? selectedNode.password : undefined);
+      
+      // Override auth type for Cloud providers to force JSON handling if key looks like JSON
+      let effectiveAuth = selectedNode.type as AuthMethod;
+      if ((selectedNode.provider === 'Google Earth Engine' || selectedNode.provider === 'Google BigQuery') && selectedNode.key?.trim().startsWith('{')) {
+          effectiveAuth = 'Service Account (JSON)';
+      }
+
+      const result = await pingUrl(
+          targetUrl, 
+          effectiveAuth, 
+          selectedNode.key || '', 
+          selectedNode.proxy, 
+          selectedNode.projectId, 
+          selectedNode.provider, 
+          selectedNode.provider === 'JQData (JoinQuant)' ? selectedNode.username : undefined, 
+          selectedNode.provider === 'JQData (JoinQuant)' ? selectedNode.password : undefined
+      );
       
       let newStatus: Connection['status'] = 'error';
       if (result.success) newStatus = result.restricted ? 'restricted' : 'online';
