@@ -171,7 +171,7 @@ async def lifespan(app: FastAPI):
     logger.info("🔴 System Shutdown.")
 
 # Set Current Version
-CURRENT_VERSION = "3.3.9-DEEPTEST-HUGE"
+CURRENT_VERSION = "3.4.0-FeepTestGoingOn"
 
 app = FastAPI(title="QuantAgrify Middleware", version=CURRENT_VERSION, lifespan=lifespan)
 
