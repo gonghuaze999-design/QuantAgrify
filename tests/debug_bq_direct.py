@@ -1,31 +1,62 @@
 
 import os
 import sys
+import glob
 from google.cloud import bigquery
 from google.oauth2.service_account import Credentials
 
 # --- 配置区域 ---
-KEY_PATH = "service_account.json"  # 请确保您的 json 密钥在项目根目录，或者修改此路径
-PROJECT_ID = None # 如果 json 里包含了 project_id，这里留空即可；否则请手动填入
+# 自动搜索以下路径
+SEARCH_PATHS = [
+    "service_account.json",
+    "/content/service_account.json",
+    "./service_account.json",
+    "../service_account.json"
+]
+
 DATASET_ID = "quant_database"
 TABLE_ID = "futures_1min"
 
-def debug_bigquery():
-    print("🚀 开始 BigQuery 深度诊断...")
+def find_key_file():
+    print(f"📂 当前工作目录 (CWD): {os.getcwd()}")
+    print("👀 正在当前目录下查找文件...")
+    files = os.listdir(os.getcwd())
+    print(f"   发现文件: {files}")
+    
+    for path in SEARCH_PATHS:
+        if os.path.exists(path):
+            print(f"✅ 找到密钥文件: {path}")
+            return path
+    
+    # 如果还没找到，尝试模糊搜索
+    print("⚠️ 精确路径未找到，尝试搜索所有 .json 文件...")
+    json_files = glob.glob("*.json") + glob.glob("/content/*.json")
+    for f in json_files:
+        if "service" in f or "account" in f or "key" in f:
+            print(f"❓ 发现疑似密钥文件: {f}")
+            return f
+            
+    return None
 
-    # 1. 连接检查
-    if not os.path.exists(KEY_PATH):
-        print(f"❌ 错误: 找不到密钥文件: {KEY_PATH}")
-        print("   请把您的 Google Cloud Service Account JSON 文件放到根目录并重命名为 service_account.json")
+def debug_bigquery():
+    print("🚀 开始 BigQuery 深度诊断 (增强版)...")
+
+    # 1. 智能查找密钥
+    key_path = find_key_file()
+    
+    if not key_path:
+        print("\n❌ 致命错误: Python 环境无法读取 'service_account.json'。")
+        print("   虽然您在左侧看到了它，但 Python 没看到。")
+        print("   尝试方法: 右键点击左侧的 json 文件 -> '复制路径' (Copy path)，然后手动修改代码中的 KEY_PATH。")
         return
 
     try:
-        creds = Credentials.from_service_account_file(KEY_PATH)
+        creds = Credentials.from_service_account_file(key_path)
         client = bigquery.Client(credentials=creds, project=creds.project_id)
         project = client.project
-        print(f"✅ 连接成功! Project ID: {project}")
+        print(f"✅ 认证成功! Project ID: {project}")
     except Exception as e:
-        print(f"❌ 连接失败: {str(e)}")
+        print(f"❌ 认证失败 (文件可能损坏或格式错误): {str(e)}")
         return
 
     full_table_id = f"{project}.{DATASET_ID}.{TABLE_ID}"
@@ -36,8 +67,10 @@ def debug_bigquery():
         table = client.get_table(full_table_id)
         print(f"✅ 表存在。行数: {table.num_rows} 行")
         print("📋 表结构 (Schema):")
+        column_names = []
         for schema in table.schema:
             print(f"   - {schema.name} ({schema.field_type})")
+            column_names.append(schema.name)
     except Exception as e:
         print(f"❌ 无法获取表信息 (表可能不存在或名字错了): {str(e)}")
         return
@@ -54,45 +87,59 @@ def debug_bigquery():
         for row in rows:
             # 打印成字典方便看
             print(dict(row))
-            
-        if rows:
-            sample_symbol = rows[0].get('symbol')
-            print(f"\n💡 关键发现: 数据库里的 Symbol 格式是: '{sample_symbol}'")
     except Exception as e:
         print(f"❌ 查询失败: {str(e)}")
 
-    # 4. 针对性测试 (测试 C9999)
-    # 我们同时测试带 'X' 和不带 'X' 的情况
-    print("\n🎯 针对性匹配测试 (C9999):")
+    # 4. 关键字段深度分析
+    # 我们需要找到代表 "合约代码" 的字段，通常是 contract, symbol, code 等
+    target_col = None
+    if 'contract' in column_names: target_col = 'contract'
+    elif 'symbol' in column_names: target_col = 'symbol'
+    elif 'code' in column_names: target_col = 'code'
     
-    target_date = "2025-12-01" # 根据您的截图，这是有数据的时间段
-    
-    # Test 1: XDCE (文件名里的格式)
-    query_xdce = f"""
-        SELECT COUNT(*) as count FROM `{full_table_id}` 
-        WHERE symbol LIKE '%XDCE%' AND date >= '{target_date}'
-    """
-    count_xdce = list(client.query(query_xdce).result())[0].get('count')
-    print(f"   👉 搜索 '%XDCE%' (如 C9999.XDCE): 找到 {count_xdce} 条")
+    if target_col:
+        print(f"\n🕵️‍♀️ 深入分析字段: '{target_col}'")
+        
+        # 4.1 列出所有不重复的合约代码 (Limit 50)
+        print(f"   正在提取前 50 个不重复的合约代码...")
+        query_distinct = f"""
+            SELECT DISTINCT {target_col} 
+            FROM `{full_table_id}` 
+            LIMIT 50
+        """
+        distinct_rows = list(client.query(query_distinct).result())
+        print(f"   👉 发现 {len(distinct_rows)} 个不同合约，示例:")
+        for r in distinct_rows:
+            print(f"      [{r[0]}]")
 
-    # Test 2: DCE (后端代码转换后的格式)
-    query_dce = f"""
-        SELECT COUNT(*) as count FROM `{full_table_id}` 
-        WHERE symbol LIKE '%DCE%' AND symbol NOT LIKE '%XDCE%' AND date >= '{target_date}'
-    """
-    count_dce = list(client.query(query_dce).result())[0].get('count')
-    print(f"   👉 搜索 '%DCE%' (如 C9999.DCE, 不含X): 找到 {count_dce} 条")
+        # 4.2 统计每个合约的时间范围
+        print(f"\n   正在统计各合约的数据量和时间跨度 (Top 10)...")
+        # 假设时间字段是 timestamp 或 timestamp_field_0
+        time_col = 'timestamp' if 'timestamp' in column_names else 'timestamp_field_0'
+        
+        query_stats = f"""
+            SELECT 
+                {target_col},
+                COUNT(*) as total_rows,
+                MIN({time_col}) as start_time,
+                MAX({time_col}) as end_time
+            FROM `{full_table_id}`
+            GROUP BY {target_col}
+            ORDER BY total_rows DESC
+            LIMIT 10
+        """
+        stats_rows = list(client.query(query_stats).result())
+        print(f"   {'合约代码':<20} | {'行数':<10} | {'开始时间'} -> {'结束时间'}")
+        print("-" * 70)
+        for r in stats_rows:
+            code = str(r[0])
+            count = str(r[1])
+            start = str(r[2])
+            end = str(r[3])
+            print(f"   {code:<20} | {count:<10} | {start} -> {end}")
 
-    # 5. 结论建议
-    print("\n--- 诊断结论 ---")
-    if count_xdce > 0 and count_dce == 0:
-        print("🔴 问题定位: 您的数据库存的是 'XDCE' 格式，但后端代码在查询前把 'X' 去掉了。")
-        print("✅ 解决办法: 我需要修改 backend/main.py，去掉 normalize_bq_symbol 函数里的转换逻辑，让它直接查 XDCE。")
-    elif count_xdce == 0 and count_dce == 0:
-        print("🔴 问题定位: 即使在 2025-12月，也没有查到任何包含 DCE 或 XDCE 的数据。")
-        print("   可能原因: 数据导入 BigQuery 失败，或者时间戳格式有问题。")
     else:
-        print("🟢 数据看起来没问题，可能是前端日期范围传错了。")
+        print("\n❌ 无法自动识别合约代码字段。请参考上面的表结构手动指定。")
 
 if __name__ == "__main__":
     debug_bigquery()

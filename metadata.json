@@ -1,11 +1,11 @@
 
 {
-  "description": "QuantAgrify v3.3.8 DeepTest (Stable). Validated Hybrid Cloud Data Bus with Broad Search Logic. 20-year 1min Futures History via BigQuery + JQData Live Patching.",
+  "description": "QuantAgrify v3.3.9 DeepTestHuge (Stable). Titan v7.1 Elite Harvest Edition integrated. Features Merton Jump Diffusion (MJD) modeling, Risk Parity Robots, and validated Hybrid Cloud Data Bus for high-volume 1min futures data.",
   "requestFramePermissions": [
     "camera",
     "microphone",
     "geolocation"
   ],
-  "name": "QuantAgrify v3.3.8 DeepTest",
-  "version": "3.3.8-DeepTest"
+  "name": "QuantAgrify v3.3.9 DeepTestHuge",
+  "version": "3.3.9-DeepTestHuge"
 }

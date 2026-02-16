@@ -1,32 +1,34 @@
 
-# QuantAgrify System Snapshot (v3.3.8 DeepTest)
+# QuantAgrify System Snapshot (v3.3.9 DeepTestHuge)
 
-**Timestamp:** Hybrid Data Bus Verified Stable
-**Status:** **SUCCESS**
+**Timestamp:** Titan v7.1 Elite Integration & Huge Data Stability Verified
+**Status:** **STABLE MILESTONE**
 
-## 1. Version Highlights (v3.3.8 DeepTest)
-This snapshot solidifies the success of the **Hybrid Cloud Data Bus** after resolving critical BigQuery matching issues.
+## 1. Version Highlights (v3.3.9 DeepTestHuge)
+This snapshot encapsulates the **Elite Harvest Edition** of the Titan simulation engine and the **Huge** data throughput capabilities of the Hybrid Cloud Bus.
 
 ### Key Milestones
-*   **Broad Search Strategy (LIKE Query):**
-    *   Resolved the "No Data" issue by implementing fuzzy matching (`LIKE '%C9999%'`) in the SQL layer.
-    *   This successfully bridged the gap between frontend requests (`C9999.XDCE`) and backend storage (`C9999.DCE` or similar variants).
-*   **High-Volume Throughput:**
-    *   Confirmed capability to pull **50,000 rows** of 1-minute data in a single request (~1 year of intraday data).
-    *   Daily aggregation logic verified working correctly on the backend.
-*   **Hybrid Patching:**
-    *   Verified seamless fallback to JQData for recent/live data gaps.
+*   **Titan v7.1 Integration:**
+    *   **Merton Jump Diffusion (MJD) Model:** Replaced simple Ornstein-Uhlenbeck for agricultural price simulation, allowing for "jumps" characteristic of weather/policy shocks.
+    *   **Risk Parity Robots:** Implemented "Harvester" bot with regime-switching logic and volatility targeting (>10% annual target).
+    *   **Strategic Asset List:** Removed low-quality assets (e.g. WT9999), focused on Corn/Soy/Rice/Apple.
+*   **BigQuery "Huge" Data Handling:**
+    *   Verified `LIKE` query logic for robust symbol matching across diverse contract naming conventions.
+    *   Stable ingestion of 50,000+ rows per request (1-minute granularity).
+*   **Colab Simulation Suite:**
+    *   `colab_titan_simulation.py` upgraded to v7.1 with MJD logic and advanced reporting.
 
 ## 2. Architecture Status
-*   **Backend (`backend/main.py`):** 
-    *   Version: `v3.3.8-DEEPTEST`
-    *   Feature: `normalize_bq_symbol` set to identity mode.
-    *   Feature: SQL Query uses `LIKE` for robust symbol matching.
-*   **Frontend:** No changes required; the fix was purely backend logic.
+*   **Backend (`backend/main.py`):**
+    *   Version: `v3.3.9-DEEPTEST-HUGE`
+    *   Feature: Hybrid Data Bus (BQ Archive + JQ Live Patching) fully operational.
+*   **Simulation (`tests/colab_titan_simulation.py`):**
+    *   Version: v7.1 Elite Harvest Edition.
+    *   Feature: Risk Parity Allocation logic implemented in backtester.
 
 ## 3. Next Steps
-*   **Stress Testing:** Run full 20-year backtests on the Strategy Engine using the now-available data.
-*   **Scaling:** Monitor BigQuery costs as data volume increases.
+*   **Live Deployment:** Move the v7.1 logic from `colab_titan_simulation.py` into the main React `AnalysisCockpit.tsx` to align the web UI with the Python research backend.
+*   **Latency Opt:** Optimize 1min data aggregation query times for huge datasets.
 
 ---
-*Snapshot v3.3.8 DeepTest created by Lead Architect.*
+*Snapshot v3.3.9 DeepTestHuge created by Lead Architect.*
