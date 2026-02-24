@@ -288,7 +288,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-2.5-flash",
               contents: prompt,
               config: { tools: [{ googleSearch: {} }] }
           });
@@ -351,7 +351,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
     // 2. Allow empty credentials if JQData is not configured (for BigQuery-only mode).
     const savedConns = JSON.parse(localStorage.getItem('quant_api_connections') || '[]');
     
-    let bridgeUrl = 'http://localhost:8000'; // Default fallback
+    let bridgeUrl = process.env.BACKEND_URL || 'http://localhost:8000'; // Default fallback
     let jqCreds = { username: '', password: '' };
     // let foundBackend = false;
 

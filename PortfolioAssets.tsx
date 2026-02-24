@@ -76,7 +76,7 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
             : `Portfolio is currently 100% Cash (${currencySymbol}${engineStatus.account.equity.toFixed(2)}).`;
 
           const prompt = `Act as a Portfolio Manager. ${context}. Provide a single, short strategic tip (max 20 words).`;
-          const response = await ai.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
+          const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
           setOptimizationTip(response.text);
           SystemLogStream.push({ type: 'SUCCESS', module: 'Portfolio', action: 'AI_Result', message: 'Optimization tip ready.', payload: { tip: response.text } });
       } catch (e: any) {

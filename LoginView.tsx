@@ -7,9 +7,9 @@ interface LoginViewProps {
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [isInitializing, setIsInitializing] = useState(false);
   const [bootStage, setBootStage] = useState(0);
-  const [formData] = useState({
-    terminalId: 'admin@quantagrify.io',
-    accessKey: 'password123'
+  const [formData, setFormData] = useState({
+    terminalId: '',
+    accessKey: ''
   });
 
   const handleInitialize = (e: React.FormEvent) => {
@@ -67,13 +67,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             <div className="space-y-2">
               <label className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest ml-1">Terminal UID</label>
               <div className="relative group/input">
-                <input className="w-full bg-[#05070a]/60 border border-white/5 rounded-xl py-4 px-6 text-sm text-white focus:border-[#0d59f2] transition-all outline-none font-mono tracking-tight" type="text" value={formData.terminalId} readOnly />
+                <input className="w-full bg-[#05070a]/60 border border-white/5 rounded-xl py-4 px-6 text-sm text-white focus:border-[#0d59f2] transition-all outline-none font-mono tracking-tight" type="text" value={formData.terminalId} onChange={e => setFormData(p => ({ ...p, terminalId: e.target.value }))} placeholder="Terminal UID" />
                 <span className="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-[#90a4cb] text-sm opacity-40">fingerprint</span>
               </div>
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-[#90a4cb] uppercase tracking-widest ml-1">Access Token</label>
-              <input className="w-full bg-[#05070a]/60 border border-white/5 rounded-xl py-4 px-6 text-sm text-white focus:border-[#0d59f2] transition-all outline-none font-mono" type="password" value={formData.accessKey} readOnly />
+              <input className="w-full bg-[#05070a]/60 border border-white/5 rounded-xl py-4 px-6 text-sm text-white focus:border-[#0d59f2] transition-all outline-none font-mono" type="password" value={formData.accessKey} onChange={e => setFormData(p => ({ ...p, accessKey: e.target.value }))} placeholder="Access Token" />
             </div>
             <button type="submit" className="w-full bg-[#0d59f2] hover:bg-[#1a66ff] text-white font-bold py-5 rounded-xl transition-all shadow-lg shadow-[#0d59f2]/20 flex items-center justify-center gap-3 group/btn relative overflow-hidden">
               <span className="relative z-10 tracking-[0.2em] uppercase text-xs">Authorize Link</span>

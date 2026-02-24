@@ -83,7 +83,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-2.5-flash",
               contents: `Act as a Portfolio Manager. Write a short professional performance brief (max 3 sentences) based on: ${context}`
           });
           setNarrative(response.text || "Analysis failed.");

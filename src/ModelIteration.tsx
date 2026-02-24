@@ -246,7 +246,7 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-2.5-flash",
               contents: prompt
           });
           

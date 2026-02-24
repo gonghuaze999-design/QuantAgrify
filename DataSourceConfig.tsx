@@ -200,7 +200,7 @@ const SATELLITE_CACHE = {
     targetYear: currentYear,
     compareYear: currentYear - 1,
     selectedStage: 'reproductive',
-    backendUrl: 'http://localhost:8000',
+    backendUrl: process.env.BACKEND_URL || 'http://localhost:8000',
     // Visual State
     zoomLevel: 1,
     pan: { x: 0, y: 0 },
@@ -400,7 +400,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
 
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-          const response = await ai.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
+          const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
           const text = response.text;
           if (text) {
               const cleaned = text.replace(/```json|```/g, '').trim();
