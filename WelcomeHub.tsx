@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { SystemClock } from './SystemClock';
-import { GLOBAL_MARKET_CONTEXT } from './GlobalState';
+import { GLOBAL_MARKET_CONTEXT, GEMINI_API_KEY, setGeminiApiKey } from './GlobalState';
 
 interface WelcomeHubProps {
   onNavigate: (view: 'dataSource' | 'algorithm' | 'cockpit' | 'api' | 'userMgmt' | 'login') => void;
@@ -61,6 +61,8 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
   const [startDate, setStartDate] = useState(GLOBAL_MARKET_CONTEXT.startDate);
   const [endDate, setEndDate] = useState(GLOBAL_MARKET_CONTEXT.endDate);
   const [colorMode, setColorMode] = useState<'US' | 'CN'>(GLOBAL_MARKET_CONTEXT.colorMode);
+  const [geminiKey, setGeminiKeyState] = useState(GEMINI_API_KEY);
+  const [keyVisible, setKeyVisible] = useState(false);
 
   // Apply color mode changes to CSS variables instantly
   useEffect(() => {
@@ -99,6 +101,11 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
           GLOBAL_MARKET_CONTEXT.colorMode = mode;
       }
       GLOBAL_MARKET_CONTEXT.isContextSet = true;
+  };
+
+  const handleGeminiKeyChange = (value: string) => {
+      setGeminiKeyState(value);
+      setGeminiApiKey(value);
   };
 
   return (
@@ -295,11 +302,28 @@ export const WelcomeHub: React.FC<WelcomeHubProps> = ({ onNavigate }) => {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-[9px] font-bold text-[#0bda5e] uppercase tracking-widest animate-pulse flex items-center gap-2">
-                        <span className="size-2 rounded-full bg-[#0bda5e]"></span>
-                        Context Active
-                    </span>
+                <div className="flex items-center gap-4 shrink-0">
+                    <div className="flex flex-col items-end gap-1">
+                        <label className="text-[8px] font-bold text-[#90a4cb] uppercase tracking-widest flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[12px] text-[#0d59f2]">key</span>
+                            Gemini API Key
+                        </label>
+                        <div className="flex items-center gap-2 bg-[#101622] border border-[#314368] rounded-lg px-3 py-1.5 focus-within:border-[#0d59f2] transition-colors">
+                            <input
+                                type={keyVisible ? 'text' : 'password'}
+                                value={geminiKey}
+                                onChange={(e) => handleGeminiKeyChange(e.target.value)}
+                                placeholder="AIza..."
+                                className="bg-transparent text-white text-xs font-mono outline-none w-[200px] placeholder:text-[#314368]"
+                            />
+                            <button onClick={() => setKeyVisible(v => !v)} className="text-[#90a4cb] hover:text-white transition-colors">
+                                <span className="material-symbols-outlined text-[14px]">{keyVisible ? 'visibility_off' : 'visibility'}</span>
+                            </button>
+                            {geminiKey && (
+                                <span className="size-2 rounded-full bg-[#0bda5e] animate-pulse shrink-0" title="Key configured"></span>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
             </div>

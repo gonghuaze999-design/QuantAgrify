@@ -16,7 +16,7 @@ import {
   Area,
   Cell
 } from 'recharts';
-import { PROCESSED_DATASET, DATA_LAYERS, FEATURE_VIEW_CACHE, getTrendColor } from './GlobalState';
+import { PROCESSED_DATASET, DATA_LAYERS, FEATURE_VIEW_CACHE, getTrendColor, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface FeatureEngineeringProps {
@@ -404,11 +404,11 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   };
 
   const handleAiGenerate = async () => {
-      if (!aiPrompt || !process.env.API_KEY) return;
+      if (!aiPrompt || !GEMINI_API_KEY) return;
       setIsThinking(true);
       
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const prompt = `
             You are a Quant Developer. Convert this request into a Factor Definition JSON.
             Request: "${aiPrompt}"
@@ -452,7 +452,7 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
   };
 
   const handleRunAudit = async () => {
-      if (!process.env.API_KEY || !selectedFactorId) return;
+      if (!GEMINI_API_KEY || !selectedFactorId) return;
       const activeFactor = activeFactors.find(f => f.id === selectedFactorId);
       if (!activeFactor) return;
 
@@ -473,7 +473,7 @@ export const FeatureEngineering: React.FC<FeatureEngineeringProps> = ({ onNaviga
       `;
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
               model: "gemini-2.5-flash",
               contents: prompt

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { ResponsiveContainer, Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Tooltip } from 'recharts';
-import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, getTrendColor } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, getTrendColor, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface PolicySentimentProps {
@@ -190,14 +190,14 @@ export const PolicySentiment: React.FC<PolicySentimentProps> = ({ onNavigate }) 
     setFeed([]);
     setSelectedItem(null);
 
-    if (!process.env.API_KEY) {
+    if (!GEMINI_API_KEY) {
         setError("Missing Google Gemini API Key.");
         setLoading(false);
         return;
     }
 
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         
         // Advanced Prompt for "Trader Perspective"
         const prompt = `

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { DATA_LAYERS, CUSTOM_UPLOAD_STATE, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS } from './GlobalState';
+import { DATA_LAYERS, CUSTOM_UPLOAD_STATE, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface CustomUploadProps {
@@ -334,9 +334,9 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
 
       try {
           // Check API Key
-          if (!process.env.API_KEY) throw new Error("API Key Missing");
+          if (!GEMINI_API_KEY) throw new Error("API Key Missing");
 
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           
           let parts: any[] = [];
           
@@ -744,9 +744,9 @@ export const CustomUpload: React.FC<CustomUploadProps> = ({ onNavigate }) => {
       setIsProcessingAI(true);
 
       try {
-          if (!process.env.API_KEY) throw new Error("API Key Missing");
+          if (!GEMINI_API_KEY) throw new Error("API Key Missing");
           
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           
           // --- REAL ETL PROCESSING ---
           // Determine Primary Asset

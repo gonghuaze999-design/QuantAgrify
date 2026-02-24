@@ -14,7 +14,7 @@ import {
   ComposedChart,
   Area
 } from 'recharts';
-import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface DataSourceConfigProps {
@@ -383,7 +383,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
   useEffect(() => { setIsPushed(false); }, [activeAsset, targetYear]);
 
   const generateAgronomicInsight = async (alpha: number, trendData: any[]) => {
-      if (!process.env.API_KEY || trendData.length === 0) return;
+      if (!GEMINI_API_KEY || trendData.length === 0) return;
       setIsAiAnalyzing(true);
       const target = SATELLITE_TARGETS[activeAsset];
       const stageInfo = PHENOLOGY_STAGES.find(s => s.id === selectedStage)?.label;
@@ -399,7 +399,7 @@ export const DataSourceConfig: React.FC<DataSourceConfigProps> = ({ onNavigate }
       `;
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt });
           const text = response.text;
           if (text) {

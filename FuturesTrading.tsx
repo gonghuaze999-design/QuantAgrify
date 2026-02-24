@@ -16,7 +16,7 @@ import {
   PolarRadiusAxis,
   Radar
 } from 'recharts';
-import { EXCHANGE_MAPPING, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS, GLOBAL_MARKET_CONTEXT, DATA_LAYERS, getTrendColor } from './GlobalState';
+import { EXCHANGE_MAPPING, PUSHED_ASSETS, PUSHED_ASSET_CONTEXTS, GLOBAL_MARKET_CONTEXT, DATA_LAYERS, getTrendColor, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface FuturesTradingProps {
@@ -242,7 +242,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
   };
 
   const fetchSpecificSentiment = async (varietyCode: string, exchangeName: string) => {
-      if (!process.env.API_KEY) return;
+      if (!GEMINI_API_KEY) return;
 
       const sentimentKey = `${varietyCode}-${exchangeName}`;
       const now = Date.now();
@@ -286,7 +286,7 @@ export const FuturesTrading: React.FC<FuturesTradingProps> = ({ onNavigate }) =>
       `;
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
               model: "gemini-2.5-flash",
               contents: prompt,

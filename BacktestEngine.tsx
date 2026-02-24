@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { DEPLOYED_STRATEGY, SystemLogStream } from './GlobalState';
+import { DEPLOYED_STRATEGY, SystemLogStream, GEMINI_API_KEY } from './GlobalState';
 import { GLOBAL_EXCHANGE, EngineMode } from './SimulationEngine';
 import { 
   ComposedChart, 
@@ -225,13 +225,13 @@ export const BacktestEngine: React.FC<BacktestEngineProps> = ({ onNavigate }) =>
 
   // --- 5. AI STRESS TEST ---
   const runStressTest = async () => {
-      if (!process.env.API_KEY || !scenario || !hasStrategy) return;
+      if (!GEMINI_API_KEY || !scenario || !hasStrategy) return;
       setIsSimulating(true);
       setSimulationResult(null);
       SystemLogStream.push({ type: 'INFO', module: 'Backtest', action: 'StressTest', message: `Simulating scenario: ${scenario}` });
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const prompt = `
             Act as a Quantitative Risk Analyst.
             Strategy: ${DEPLOYED_STRATEGY.content?.meta.strategyId}

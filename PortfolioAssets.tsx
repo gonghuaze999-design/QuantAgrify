@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { getTrendColor, SystemLogStream } from './GlobalState';
+import { getTrendColor, SystemLogStream, GEMINI_API_KEY } from './GlobalState';
 import { GLOBAL_EXCHANGE, EngineMode } from './SimulationEngine';
 import { 
   PieChart, 
@@ -64,12 +64,12 @@ export const PortfolioAssets: React.FC<PortfolioAssetsProps> = ({ onNavigate }) 
   };
 
   const runOptimization = async () => {
-      if (!process.env.API_KEY) return;
+      if (!GEMINI_API_KEY) return;
       setIsOptimizing(true);
       SystemLogStream.push({ type: 'INFO', module: 'Portfolio', action: 'AI_Scan', message: 'Portfolio health scan initiated.' });
       
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const pos = engineStatus.positions;
           const context = pos 
             ? `Current Position: ${pos.side} ${pos.quantity} units of ${pos.symbol}.` 

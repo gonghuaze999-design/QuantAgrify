@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { getTrendColor, DATA_LAYERS, SystemLogStream } from './GlobalState';
+import { getTrendColor, DATA_LAYERS, SystemLogStream, GEMINI_API_KEY } from './GlobalState';
 import { GLOBAL_EXCHANGE } from './SimulationEngine';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 
@@ -81,7 +81,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
   }, [engineStatus.account.history, engineStatus.account.equity, engineStatus.account.marginUsed, symbol]);
 
   const runScenarioAnalysis = async (scenario: string) => {
-      if (!process.env.API_KEY) return;
+      if (!GEMINI_API_KEY) return;
       setIsSimulating(true);
       setAiAnalysis(null);
       SystemLogStream.push({ type: 'INFO', module: 'Risk', action: 'ScenarioSim', message: `Testing: ${scenario}` });
@@ -103,7 +103,7 @@ export const RiskManagement: React.FC<RiskManagementProps> = ({ onNavigate }) =>
       `;
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
               model: "gemini-2.5-flash",
               contents: prompt

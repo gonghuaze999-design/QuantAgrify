@@ -17,6 +17,10 @@ export interface AssetContext {
 
 export const PUSHED_ASSET_CONTEXTS = new Map<string, AssetContext>();
 
+// === GEMINI API KEY (Global, set via WelcomeHub) ===
+export let GEMINI_API_KEY: string = '';
+export const setGeminiApiKey = (key: string) => { GEMINI_API_KEY = key; };
+
 // === NEW: GLOBAL MARKET CONTEXT (Set in WelcomeHub) ===
 // This allows the user to define their intent before entering specific modules.
 export const GLOBAL_MARKET_CONTEXT = {

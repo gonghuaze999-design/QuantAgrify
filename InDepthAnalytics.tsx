@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { getTrendColor, DATA_LAYERS, SystemLogStream } from './GlobalState';
+import { getTrendColor, DATA_LAYERS, SystemLogStream, GEMINI_API_KEY } from './GlobalState';
 import { GLOBAL_EXCHANGE } from './SimulationEngine';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 
@@ -68,7 +68,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
   }, [engineStatus]);
 
   const generateNarrative = async () => {
-      if (!process.env.API_KEY) return;
+      if (!GEMINI_API_KEY) return;
       setIsGenerating(true);
       SystemLogStream.push({ type: 'INFO', module: 'Analytics', action: 'GenerateNarrative', message: 'Requesting performance attribution...' });
       
@@ -81,7 +81,7 @@ export const InDepthAnalytics: React.FC<InDepthAnalyticsProps> = ({ onNavigate }
       ` : "No trades executed yet.";
       
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
               model: "gemini-2.5-flash",
               contents: `Act as a Portfolio Manager. Write a short professional performance brief (max 3 sentences) based on: ${context}`
