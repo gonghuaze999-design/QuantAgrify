@@ -17,7 +17,7 @@ import {
   AreaChart,
   Brush 
 } from 'recharts';
-import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, getTrendColor } from './GlobalState';
+import { DATA_LAYERS, GLOBAL_MARKET_CONTEXT, getTrendColor, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface SupplyDemandProps {
@@ -518,7 +518,7 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
 
   // --- 6. AI Synthesis Logic (with 10-minute Caching) ---
   const runAiSynthesis = useCallback(async (force = false) => {
-      if (!process.env.API_KEY) {
+      if (!GEMINI_API_KEY) {
           setAiAnalysis(prev => ({ ...prev, loading: false, keyDriver: 'API Key Missing', narrative: 'Please configure Google Gemini API Key.' }));
           return;
       }
@@ -542,7 +542,7 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
       }));
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           
           let contextPrompt = `Analyze ${activeCommodity} Supply/Demand for a Professional Trading Dashboard. \n\n`;
           if (marketStats) contextPrompt += `[PRICE] Source: ${marketStats.source}, Price: ${marketStats.price}, Change: ${marketStats.pct}%\n`;
@@ -580,7 +580,7 @@ export const SupplyDemand: React.FC<SupplyDemandProps> = ({ onNavigate }) => {
           `;
 
           const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-2.5-flash",
               contents: prompt,
               config: { tools: [{ googleSearch: {} }] }
           });

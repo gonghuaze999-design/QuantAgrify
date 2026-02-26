@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, ReferenceLine, ComposedChart, Line } from 'recharts';
 import { GLOBAL_EXCHANGE, EngineMode, EngineAlert } from './SimulationEngine';
-import { GLOBAL_MARKET_CONTEXT, DATA_LAYERS, PROCESSED_DATASET, COCKPIT_VIEW_CACHE, DEPLOYED_STRATEGY, SystemLogStream, getTrendColor } from './GlobalState';
+import { GLOBAL_MARKET_CONTEXT, DATA_LAYERS, PROCESSED_DATASET, COCKPIT_VIEW_CACHE, DEPLOYED_STRATEGY, SystemLogStream, getTrendColor, GEMINI_API_KEY } from './GlobalState';
 
 interface AnalysisCockpitProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'weatherAnalysis' | 'futuresTrading' | 'supplyDemand' | 'policySentiment' | 'spotIndustry' | 'customUpload' | 'algorithm' | 'featureEngineering' | 'multiFactorFusion' | 'riskControl' | 'modelIteration' | 'cockpit' | 'inDepthAnalytics' | 'backtestEngine' | 'riskManagement' | 'portfolioAssets' | 'api') => void;
@@ -309,7 +309,7 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
   };
 
   const runRobotBrainCycle = async () => {
-      if (!process.env.API_KEY) {
+      if (!GEMINI_API_KEY) {
           addLog('SYS', 'AI Core Disconnected. Running fallback logic.', 'NEUTRAL', 0);
           return;
       }
@@ -360,9 +360,9 @@ export const AnalysisCockpit: React.FC<AnalysisCockpitProps> = ({ onNavigate }) 
       `;
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-2.5-flash",
               contents: prompt
           });
           

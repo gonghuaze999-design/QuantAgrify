@@ -13,7 +13,7 @@ import {
   ReferenceLine,
   Cell
 } from 'recharts';
-import { DATA_LAYERS, CompositeSignalPackage, RISK_VIEW_CACHE, getTrendColor } from './GlobalState';
+import { DATA_LAYERS, CompositeSignalPackage, RISK_VIEW_CACHE, getTrendColor, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface RiskControlProps {
@@ -150,14 +150,14 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
 
     // 3. AI Simulation
     const runSimulation = async () => {
-        if (!process.env.API_KEY) return;
+        if (!GEMINI_API_KEY) return;
         setIsSimulating(true);
         setAiAnalysisText("");
 
         const scenarioText = selectedScenario === "Custom" ? customScenario : selectedScenario;
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
             const prompt = `
                 Act as a Risk Manager.
                 Asset: ${signalInput?.asset || 'Unknown'}
@@ -170,7 +170,7 @@ export const RiskControl: React.FC<RiskControlProps> = ({ onNavigate }) => {
             `;
             
             const response = await ai.models.generateContent({
-                model: "gemini-3-flash-preview",
+                model: "gemini-2.5-flash",
                 contents: prompt
             });
             

@@ -708,7 +708,7 @@ export const ApiConsole: React.FC<ApiConsoleProps> = ({ onNavigate }) => {
     let name = '';
     
     if(p === 'Google Earth Engine' || p === 'Google BigQuery') { 
-        url = 'http://localhost:8000'; 
+        url = process.env.BACKEND_URL || 'http://localhost:8000';
         auth = 'Service Account (JSON)';
         name = p === 'Google BigQuery' ? 'BigQuery (Private DB)' : 'GEE (Backend Relay)';
     }

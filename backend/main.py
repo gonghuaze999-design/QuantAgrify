@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import json
+import re
 import time
 import datetime
 import traceback
@@ -49,6 +50,7 @@ except ImportError:
 
 try:
     from google.cloud import bigquery
+    from google.cloud.bigquery import ScalarQueryParameter, QueryJobConfig
     BIGQUERY_AVAILABLE = True
 except ImportError:
     BIGQUERY_AVAILABLE = False
@@ -154,8 +156,6 @@ def attempt_cloud_connection(creds_json: Optional[Dict] = None) -> bool:
         logger.error(f"❌ Cloud Critical Failure: {str(e)}")
         traceback.print_exc()
         return False
-    
-    return False
 
 
 # --- 5. APP LIFESPAN ---
@@ -175,9 +175,13 @@ CURRENT_VERSION = "3.4.0-FeepTestGoingOn"
 
 app = FastAPI(title="QuantAgrify Middleware", version=CURRENT_VERSION, lifespan=lifespan)
 
+# CORS: read allowed origins from env var (comma-separated), default to localhost dev only
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -406,6 +410,18 @@ def normalize_bq_symbol(symbol: str) -> str:
     if not symbol: return ""
     return symbol.strip()
 
+def validate_symbol(symbol: str) -> bool:
+    """Allow only alphanumeric chars and dots (e.g. 'C9999.XDCE')."""
+    return bool(re.match(r'^[A-Za-z0-9.]+$', symbol))
+
+def validate_date(date_str: str) -> bool:
+    """Ensure date string is strictly YYYY-MM-DD."""
+    try:
+        datetime.datetime.strptime(date_str, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
 @app.post("/api/market/hybrid-price")
 def get_hybrid_price(payload: PriceRequest):
     """
@@ -417,19 +433,28 @@ def get_hybrid_price(payload: PriceRequest):
     """
     symbol = payload.symbol
     bq_symbol = normalize_bq_symbol(symbol)
-    
+
+    # Validate symbol to prevent injection
+    if not bq_symbol or not validate_symbol(bq_symbol):
+        raise HTTPException(status_code=400, detail="Invalid symbol format.")
+
     # EXTRACT ROOT SYMBOL FOR BROAD SEARCH (e.g. "C9999.XDCE" -> "C9999")
     # This allows searching via LIKE to handle any minor format discrepancies in the DB
     root_symbol = bq_symbol.split('.')[0] if '.' in bq_symbol else bq_symbol
-    
+    like_pattern = f"%{root_symbol}%"  # Will be passed as a parameterized value
+
     start_date = payload.start_date
     end_date = payload.end_date
     frequency = payload.frequency or 'daily'
-    
+
     if not start_date:
         start_date = (datetime.datetime.now() - datetime.timedelta(days=365)).strftime("%Y-%m-%d")
     if not end_date:
         end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    # Validate date formats
+    if not validate_date(start_date) or not validate_date(end_date):
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
 
     bq_df = pd.DataFrame()
     source_label = "JQData (Live)" # Default if BQ fails
@@ -441,12 +466,17 @@ def get_hybrid_price(payload: PriceRequest):
             
             table_id = f"{GLOBAL_STATE['active_project']}.quant_database.futures_1min"
             
+            query_params = [
+                bigquery.ScalarQueryParameter("like_pattern", "STRING", like_pattern),
+                bigquery.ScalarQueryParameter("start_ts", "TIMESTAMP", f"{start_date} 00:00:00"),
+                bigquery.ScalarQueryParameter("end_ts", "TIMESTAMP", f"{end_date} 23:59:59"),
+            ]
+            job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+
             if frequency == 'daily' or frequency == '1d':
                 # AGGREGATION QUERY: 1min -> Daily OHLCV
-                # Using timestamp_field_0 as per user verification
-                # BROAD MATCHING: Use LIKE with root_symbol
                 query = f"""
-                    SELECT 
+                    SELECT
                         FORMAT_TIMESTAMP('%Y-%m-%d', timestamp_field_0) as date_str,
                         ARRAY_AGG(open ORDER BY timestamp_field_0 ASC LIMIT 1)[OFFSET(0)] as open,
                         MAX(high) as high,
@@ -454,31 +484,29 @@ def get_hybrid_price(payload: PriceRequest):
                         ARRAY_AGG(close ORDER BY timestamp_field_0 DESC LIMIT 1)[OFFSET(0)] as close,
                         SUM(volume) as volume
                     FROM `{table_id}`
-                    WHERE contract LIKE '%{root_symbol}%'
-                    AND timestamp_field_0 >= TIMESTAMP('{start_date}') 
-                    AND timestamp_field_0 < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
+                    WHERE contract LIKE @like_pattern
+                    AND timestamp_field_0 >= @start_ts
+                    AND timestamp_field_0 <= @end_ts
                     GROUP BY date_str
                     ORDER BY date_str ASC
                 """
                 label_suffix = "(Aggregated)"
             else:
-                # RAW QUERY: 1min
-                # UPGRADED LIMIT to 50000
-                # BROAD MATCHING: Use LIKE with root_symbol
+                # RAW QUERY: 1min, limit 50000
                 query = f"""
-                    SELECT 
+                    SELECT
                         FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', timestamp_field_0) as date_str,
                         open, high, low, close, volume
                     FROM `{table_id}`
-                    WHERE contract LIKE '%{root_symbol}%'
-                    AND timestamp_field_0 >= TIMESTAMP('{start_date}') 
-                    AND timestamp_field_0 < TIMESTAMP_ADD(TIMESTAMP('{end_date}'), INTERVAL 1 DAY)
+                    WHERE contract LIKE @like_pattern
+                    AND timestamp_field_0 >= @start_ts
+                    AND timestamp_field_0 <= @end_ts
                     ORDER BY timestamp_field_0 ASC
-                    LIMIT 50000 
+                    LIMIT 50000
                 """
                 label_suffix = "(Raw 1min)"
-            
-            query_job = GLOBAL_STATE["bq_client"].query(query)
+
+            query_job = GLOBAL_STATE["bq_client"].query(query, job_config=job_config)
             rows = list(query_job.result())
             
             if rows:
@@ -594,7 +622,7 @@ def proxy_usda(payload: ProxyRequest):
     url = f"https://apps.fas.usda.gov/psdonline/api/psd/{payload.endpoint}"
     headers = {"API_KEY": payload.apiKey}
     try:
-        res = requests.get(url, headers=headers, timeout=20, verify=False)
+        res = requests.get(url, headers=headers, timeout=20)
         if res.ok: return {"success": True, "data": res.json()}
         return {"success": False, "status": res.status_code}
     except Exception as e: return {"success": False, "error": str(e)}
@@ -604,7 +632,7 @@ def proxy_usda_quickstats(request: Request):
     url = "https://quickstats.nass.usda.gov/api/api_GET"
     try:
         params = dict(request.query_params)
-        res = requests.get(url, params=params, timeout=20, verify=False)
+        res = requests.get(url, params=params, timeout=20)
         if res.ok:
             try: return {"success": True, "data": res.json()}
             except: return {"success": False, "data": res.text}

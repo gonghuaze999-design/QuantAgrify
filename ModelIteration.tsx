@@ -15,7 +15,7 @@ import {
   Cell,
   Area
 } from 'recharts';
-import { DATA_LAYERS, RiskAnalysisPackage, DEPLOYED_STRATEGY, DeployedStrategyPackage } from './GlobalState';
+import { DATA_LAYERS, RiskAnalysisPackage, DEPLOYED_STRATEGY, DeployedStrategyPackage, GEMINI_API_KEY } from './GlobalState';
 import { SystemClock } from './SystemClock';
 
 interface ModelIterationProps {
@@ -221,7 +221,7 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
 
   // --- AI OPTIMIZER ---
   const runAiOptimization = async () => {
-      if (!activeModel || !process.env.API_KEY) return;
+      if (!activeModel || !GEMINI_API_KEY) return;
       setAiAnalysis(prev => ({ ...prev, loading: true, text: "Running diagnostic scan..." }));
 
       // FIX: Check for Flatline OR Holy Grail
@@ -265,9 +265,9 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
       `;
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-2.5-flash",
               contents: prompt
           });
           
@@ -655,5 +655,6 @@ export const ModelIteration: React.FC<ModelIterationProps> = ({ onNavigate }) =>
             </div>
         </main>
       </div>
+    </div>
     );
 };

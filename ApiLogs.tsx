@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { SystemClock } from './SystemClock';
-import { SystemLogStream, LogEntry } from './GlobalState';
+import { SystemLogStream, LogEntry, GEMINI_API_KEY } from './GlobalState';
 
 interface ApiLogsProps {
   onNavigate: (view: 'hub' | 'login' | 'dataSource' | 'algorithm' | 'cockpit' | 'api' | 'apiDocs' | 'apiLogs') => void;
@@ -228,7 +228,7 @@ export const ApiLogs: React.FC<ApiLogsProps> = ({ onNavigate }) => {
   };
 
   const runAiAnalysis = async () => {
-      if (!process.env.API_KEY) {
+      if (!GEMINI_API_KEY) {
           setAiResponse("Error: Gemini API Key is missing.");
           return;
       }
@@ -243,7 +243,7 @@ export const ApiLogs: React.FC<ApiLogsProps> = ({ onNavigate }) => {
       setAiResponse(null);
 
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const prompt = `
             You are a Senior Site Reliability Engineer (SRE) for the QuantAgrify platform.
             Analyze the selected system logs below. 
@@ -267,7 +267,7 @@ export const ApiLogs: React.FC<ApiLogsProps> = ({ onNavigate }) => {
           `;
 
           const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-2.5-flash",
               contents: prompt
           });
           
